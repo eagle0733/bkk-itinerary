@@ -473,7 +473,7 @@ function showTab(id){
 }
 
 document.getElementById('btnTodayRoute').addEventListener('click', ()=>{
-  const current = document.querySelector('[role="tabpanel"]:not([hidden])`);
+  const current = document.querySelector('[role="tabpanel"]:not([hidden])');
   if(!current) return;
   const id = Number(current.id.split('-')[1]);
   const d = days.find(x=>x.id===id); if(!d) return;
