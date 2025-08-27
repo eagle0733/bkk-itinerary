@@ -1,0 +1,21 @@
+{
+  "name": "曼谷行程（內嵌導航 v2.2）",
+  "short_name": "曼谷v2.2",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#16a34a",
+  "description": "Leaflet+OSRM 內嵌路線 + 即時追蹤/自動重算/語音/常亮。",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
