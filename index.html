@@ -3,10 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <title>曼谷行程（內嵌導航 v2.2｜分享連結版）</title>
+  <meta name="theme-color" content="#16a34a" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <title>曼谷行程（內嵌導航 v2.2｜PWA）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <style>
-    :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --chip:#1f2937; --btn:#16a34a; }
+    :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --chip:#1f2937; --btn:#16a34a; }
     *{box-sizing:border-box}
     html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC",sans-serif}
     .container{max-width:960px;margin:0 auto;padding:16px 16px 88px}
@@ -53,8 +55,8 @@
   <header>
     <div class="head-inner">
       <div>
-        <div class="title">曼谷行程（內嵌導航 v2.2｜分享連結版）</div>
-        <div class="sub">步行/開車：內嵌即時導航；大眾運輸：開啟 Google 地圖；可新增/刪除/分享行程</div>
+        <div class="title">曼谷行程（內嵌導航 v2.2｜PWA）</div>
+        <div class="sub">步行/開車：內嵌即時導航；大眾運輸：開啟 Google 地圖；支援分享連結同步</div>
       </div>
     </div>
     <div class="tabs" role="tablist" aria-label="Days">
@@ -72,6 +74,7 @@
       <button class="btn" id="btnLocate">📍 顯示目前位置</button>
       <button class="btn" id="btnTodayRoute">🗺️ 從我這裡串起今日路線</button>
       <button class="btn ghost" id="btnManage">🧩 管理行程</button>
+      <button class="btn" id="btnInstall" hidden>➕ 安裝</button>
     </div>
   </header>
 
@@ -135,9 +138,14 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
-  /* ========= v2.2 + 分享連結（跨裝置匯入） ========= */
+  /* ========= PWA（安裝＋SW 註冊） ========= */
+  let deferredPrompt;
+  const installBtn=document.getElementById('btnInstall');
+  window.addEventListener('beforeinstallprompt',(e)=>{e.preventDefault();deferredPrompt=e;installBtn.hidden=false;});
+  installBtn?.addEventListener('click',async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;installBtn.hidden=true;});
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js').catch(console.warn); }
 
-  // ----- 預設行程 -----
+  /* ========= 行程資料 ========= */
   const DEFAULT_DAYS = [
     {"id":1,"label":"Day 1｜9/26 (五) ","chips":["抵達日","Siam 區","放鬆按摩"],
      "stops":[
@@ -178,44 +186,68 @@
      ]}
   ];
 
-  // ----- 持久化 & 跨裝置「分享連結」匯入 -----
+  /* ========= 持久化＋分享匯入（強化版） ========= */
   const LS_KEY='itinerary_v1';
-  function loadDays(){ try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):null; }catch(e){ return null; } }
-  function saveDays(){ localStorage.setItem(LS_KEY, JSON.stringify(days)); }
 
-  // 若網址帶 ?data=（Base64），就把資料寫入 localStorage，並去掉參數
-  (function tryImportFromURL(){
-    const params = new URLSearchParams(location.search);
-    const encoded = params.get('data');
-    if(!encoded) return;
-    try{
-      const json = decodeURIComponent(escape(atob(encoded)));
-      const incoming = JSON.parse(json);
-      if(Array.isArray(incoming)){
-        localStorage.setItem(LS_KEY, JSON.stringify(incoming));
-        history.replaceState(null,'',location.pathname); // 清掉參數，避免重複匯入
-        window.__importedFromURL = true;
-      }
-    }catch(e){}
+  // ?reset=1 → 先清除舊資料
+  (function checkReset(){
+    const sp = new URLSearchParams(location.search);
+    if (sp.get('reset') === '1') localStorage.removeItem(LS_KEY);
   })();
 
-  let days = loadDays();
-  if(!Array.isArray(days)){ days = JSON.parse(JSON.stringify(DEFAULT_DAYS)); saveDays(); }
+  // 壞資料保護
+  function ensureValidDays(d){
+    if(!Array.isArray(d) || d.length===0) return null;
+    for(const day of d){
+      if(!day || typeof day!=='object') return null;
+      if(!('id' in day) || !Array.isArray(day.stops)) return null;
+    }
+    return d;
+  }
+  function loadDaysRaw(){ try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):null; }catch{ return null; } }
+  function saveDays(){ localStorage.setItem(LS_KEY, JSON.stringify(days)); }
 
-  // ----- UI 基本 -----
-  const FALLBACK_ORIGIN = 'Samala Hotel Bangkok';
-  const panels = document.getElementById('panels');
-  const toast = document.getElementById('toast');
-  const state = { origin: localStorage.getItem('lastOrigin')||FALLBACK_ORIGIN, map:null, routeLayer:null, markers:[], userMarker:null, externalUrl:null };
+  // 從 ?data= 或 #d= 匯入
+  function tryImportFromURL() {
+    const parseOnce = () => {
+      const qs = new URLSearchParams(location.search);
+      let encoded = qs.get('data');
+      if (!encoded && location.hash.startsWith('#d=')) encoded = location.hash.slice(3);
+      if (!encoded) return false;
+      try{
+        const json = decodeURIComponent(escape(atob(encoded)));
+        const data = JSON.parse(json);
+        if(Array.isArray(data) && data.length){
+          localStorage.setItem(LS_KEY, JSON.stringify(data));
+          history.replaceState(null,'',location.pathname);
+          window.__importedFromURL = true;
+          return true;
+        }
+      }catch(e){}
+      return false;
+    };
+    if (parseOnce()) return;
+    window.addEventListener('pageshow', ()=>{ if(parseOnce()) location.reload(); });
+  }
+  tryImportFromURL();
+
+  // 初始化 days（含回退）
+  let days = ensureValidDays(loadDaysRaw()) || JSON.parse(JSON.stringify(DEFAULT_DAYS));
+  saveDays();
+
+  /* ========= UI & 功能 ========= */
+  const FALLBACK_ORIGIN='Samala Hotel Bangkok';
+  const panels=document.getElementById('panels');
+  const toast=document.getElementById('toast');
+  const state={ origin: localStorage.getItem('lastOrigin')||FALLBACK_ORIGIN, map:null, routeLayer:null, markers:[], userMarker:null, externalUrl:null };
   function showToast(msg){ toast.textContent=msg; toast.style.display='block'; setTimeout(()=>toast.style.display='none',2200); }
-  function encodeQ(q){ return encodeURIComponent(q||''); }
-  function isSecureContext(){ return location.protocol==='https:'||location.hostname==='localhost'; }
-  function getMode(){ return document.getElementById('travelMode').value||'transit'; }
+  function encodeQ(q){return encodeURIComponent(q||'');}
+  function isSecureContext(){return location.protocol==='https:'||location.hostname==='localhost';}
+  function getMode(){return document.getElementById('travelMode').value||'transit';}
 
   function placeRow(stop){
-    const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q)}`;
-    return `
-    <div class="card">
+    const mapUrl=`https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q)}`;
+    return `<div class="card">
       <div class="row"><div class="time">${stop.time||''}</div><div class="place">${stop.title||''}</div></div>
       ${stop.note?`<div class="note">${stop.note}</div>`:''}
       <div class="actions">
@@ -225,7 +257,6 @@
       </div>
     </div>`;
   }
-
   function renderPanels(){
     panels.innerHTML='';
     days.forEach(d=>{
@@ -239,7 +270,7 @@
       panel.innerHTML=`
         <div class="card">
           <div class="row"><div style="font-size:18px;font-weight:800">${d.label||('Day '+d.id)}</div><div>${chips}</div></div>
-          <div class="note">步行/開車 ⇒ 內嵌；大眾運輸 ⇒ Google 地圖。用「🧩 管理行程」可新增/刪除/分享/匯出/匯入。</div>
+          <div class="note">步行/開車 ⇒ 內嵌；大眾運輸 ⇒ Google 地圖。可用「🧩 管理行程」新增/刪除/分享/匯出/匯入。</div>
         </div>
         <div class="grid">${rows}</div>
         <div class="route-card">
@@ -254,64 +285,59 @@
   }
   function rerenderAndSave(){ renderPanels(); saveDays(); }
 
-  // ----- 定位追蹤 -----
+  // 連續定位
   function startWatch(){
     if(!('geolocation' in navigator)){ showToast('裝置不支援定位'); return; }
     navigator.geolocation.watchPosition(pos=>{
-      state.origin = `${pos.coords.latitude},${pos.coords.longitude}`;
+      state.origin=`${pos.coords.latitude},${pos.coords.longitude}`;
       localStorage.setItem('lastOrigin', state.origin);
       if(state.map){
         if(!state.userMarker) state.userMarker=L.marker([pos.coords.latitude,pos.coords.longitude]).addTo(state.map);
         else state.userMarker.setLatLng([pos.coords.latitude,pos.coords.longitude]);
       }
       tickLive([pos.coords.latitude,pos.coords.longitude]);
-    }, err=>{
-      console.warn(err);
-    }, {enableHighAccuracy:true, timeout:12000, maximumAge:2000});
+    }, console.warn, {enableHighAccuracy:true, timeout:12000, maximumAge:2000});
   }
 
-  function buildDirURL(origin, destination, waypoints, mode){
+  function buildDirURL(origin,destination,waypoints,mode){
     const base='https://www.google.com/maps/dir/?api=1';
-    const o=`origin=${encodeURIComponent(origin)}`;
-    const d=`destination=${encodeURIComponent(destination)}`;
-    const m=`travelmode=${mode}`;
+    const o=`origin=${encodeURIComponent(origin)}`, d=`destination=${encodeURIComponent(destination)}`, m=`travelmode=${mode}`;
     const w=waypoints&&waypoints.length?`&waypoints=${waypoints.map(wp=>encodeURIComponent(wp)).join('|')}`:'';
     return `${base}&${o}&${d}${w}&${m}`;
   }
-  function openExternal(url){ const win=window.open(url,'_blank'); if(!win) location.href=url; }
+  function openExternal(url){const win=window.open(url,'_blank'); if(!win) location.href=url;}
 
-  // ----- 內嵌導航（Leaflet + OSRM） -----
+  // 內嵌導航（Leaflet + OSRM）
   const overlayEl=document.getElementById('overlay');
   const btnClose=document.getElementById('btnClose');
   const btnOpenExternal=document.getElementById('btnOpenExternal');
   const navStatus=document.getElementById('navStatus');
-  let followOn=false, lastRerouteTs=0, currentRouteCoords=[], finalDestLL=null, currentDestQ=null, currentWpsQ=[], currentMode=null;
-  const REROUTE_INTERVAL_MS=15000, OFFROUTE_THRESHOLD_M=80;
-
-  function openSheet(){ overlayEl.style.display='block'; if(!state.map) initMap(); }
-  function closeSheet(){ overlayEl.style.display='none'; }
+  let followOn=false,lastRerouteTs=0,currentRouteCoords=[],finalDestLL=null,currentDestQ=null,currentWpsQ=[],currentMode=null;
+  const REROUTE_INTERVAL_MS=15000,OFFROUTE_THRESHOLD_M=80;
+  function openSheet(){overlayEl.style.display='block'; if(!state.map) initMap();}
+  function closeSheet(){overlayEl.style.display='none';}
   btnClose.addEventListener('click', closeSheet);
   btnOpenExternal.addEventListener('click', ()=>{ if(state.externalUrl) openExternal(state.externalUrl); });
 
   function initMap(){
-    state.map = L.map('map');
+    state.map=L.map('map');
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(state.map);
-    state.map.setView([13.7563,100.5018], 12);
+    state.map.setView([13.7563,100.5018],12);
   }
   async function geocode(q){
-    const m=q && q.match?.(/^\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*$/);
-    if(m) return [parseFloat(m[1]),parseFloat(m[3])];
-    const cacheKey='gc_'+q; const cached=localStorage.getItem(cacheKey);
-    if(cached){ try{ const v=JSON.parse(cached); if(Array.isArray(v)&&v.length===2) return v; }catch(e){} }
+    const m=q && q.match?.(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if(m) return [parseFloat(m[1]),parseFloat(m[2])];
+    const key='gc_'+q; const cached=localStorage.getItem(key);
+    if(cached){ try{ const v=JSON.parse(cached); if(Array.isArray(v)&&v.length===2) return v; }catch{} }
     const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),8000);
     try{
       const r1=await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=zh-TW`,{signal:ctl.signal});
-      if(r1.ok){ const j1=await r1.json(); if(j1.features&&j1.features[0]){ const [lng,lat]=j1.features[0].geometry.coordinates; clearTimeout(t); localStorage.setItem(cacheKey,JSON.stringify([lat,lng])); return [lat,lng]; } }
-    }catch(e){}
+      if(r1.ok){ const j=await r1.json(); if(j.features&&j.features[0]){ const [lng,lat]=j.features[0].geometry.coordinates; clearTimeout(t); localStorage.setItem(key,JSON.stringify([lat,lng])); return [lat,lng]; } }
+    }catch{}
     try{
       const r2=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`,{headers:{'Accept':'application/json'},referrerPolicy:'no-referrer',signal:ctl.signal});
-      if(r2.ok){ const j2=await r2.json(); if(j2&&j2[0]){ clearTimeout(t); const lat=parseFloat(j2[0].lat), lon=parseFloat(j2[0].lon); localStorage.setItem(cacheKey,JSON.stringify([lat,lon])); return [lat,lon]; } }
-    }catch(e){}
+      if(r2.ok){ const j=await r2.json(); if(j&&j[0]){ clearTimeout(t); const lat=parseFloat(j[0].lat),lon=parseFloat(j[0].lon); localStorage.setItem(key,JSON.stringify([lat,lon])); return [lat,lon]; } }
+    }catch{}
     clearTimeout(t); throw new Error('GEOCODE_FAIL');
   }
   async function osrmRoute(coords, profile){
@@ -320,63 +346,62 @@
     const r=await fetch(url); const j=await r.json(); if(j.code!=='Ok') throw new Error('OSRM error'); return j.routes[0];
   }
   function clearRoute(){ if(state.routeLayer){state.map.removeLayer(state.routeLayer); state.routeLayer=null;} state.markers.forEach(m=>state.map.removeLayer(m)); state.markers=[]; }
-  async function inlineNavigate(originQ, destQ, waypointsQ, mode){
-    const profile = mode==='walking' ? 'foot' : 'driving';
+  async function inlineNavigate(originQ,destQ,waypointsQ,mode){
+    const profile=mode==='walking'?'foot':'driving';
     try{
       openSheet(); clearRoute();
-      let originLL; try{ originLL=await geocode(originQ); }catch(e){ originLL=await geocode(FALLBACK_ORIGIN); }
-      const wp=[]; for(const w of (waypointsQ||[])){ try{ wp.push(await geocode(w)); }catch(e){} }
-      let destLL; try{ destLL=await geocode(destQ); }catch(e){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
+      let originLL; try{ originLL=await geocode(originQ); }catch{ originLL=await geocode(FALLBACK_ORIGIN); }
+      const wp=[]; for(const w of (waypointsQ||[])){ try{ wp.push(await geocode(w)); }catch{} }
+      let destLL; try{ destLL=await geocode(destQ); }catch{ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
       const all=[originLL,...wp,destLL]; if(all.length<2){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
       const route=await osrmRoute(all, profile);
       const line=L.geoJSON(route.geometry).addTo(state.map); state.routeLayer=line;
       state.map.fitBounds(line.getBounds(),{padding:[30,30]});
       state.externalUrl=buildDirURL(originQ,destQ,waypointsQ,mode==='walking'?'walking':'driving');
-      setCurrentRoute(route, destLL); currentDestQ=destQ; currentWpsQ=waypointsQ||[]; currentMode=mode; lastRerouteTs=Date.now(); navStatus.textContent='路線已建立，您可以開始移動。';
-    }catch(e){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); }
+      setCurrentRoute(route,destLL); currentDestQ=destQ; currentWpsQ=waypointsQ||[]; currentMode=mode; lastRerouteTs=Date.now(); navStatus.textContent='路線已建立，您可以開始移動。';
+    }catch{ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); }
   }
   function setCurrentRoute(route,destLL){ currentRouteCoords=route.geometry.coordinates.map(([lng,lat])=>[lat,lng]); finalDestLL=destLL; }
   function toRad(x){return x*Math.PI/180;}
   function haversine(a,b){ const R=6371000; const dLat=toRad(b[0]-a[0]), dLon=toRad(b[1]-a[1]); const lat1=toRad(a[0]), lat2=toRad(b[0]); const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
   function nearestDistanceToLine(point,line){ let min=Infinity; for(const p of line){ const d=haversine(point,p); if(d<min) min=d; } return min; }
+  const btnFollow=document.getElementById('btnFollow'), btnWake=document.getElementById('btnWake'), btnVoice=document.getElementById('btnVoice');
+  let wakeLockObj=null, voiceOn=false;
+  async function requestWake(){ try{ wakeLockObj=await navigator.wakeLock.request('screen'); showToast('已啟用常亮'); }catch{ showToast('常亮啟用失敗'); } }
+  function releaseWake(){ try{ wakeLockObj&&wakeLockObj.release(); wakeLockObj=null; showToast('已關閉常亮'); }catch{} }
+  function speak(text){ if(!voiceOn) return; try{ const u=new SpeechSynthesisUtterance(text); u.lang='zh-TW'; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch{} }
+  btnFollow.addEventListener('click',()=>{ followOn=!followOn; btnFollow.textContent=followOn?'🛑 停止即時導航':'🔔 開始即時導航'; if(followOn){ speak('開始即時導航'); navStatus.textContent='即時導航啟動中…'; } else { navStatus.textContent='已停止即時導航'; } });
+  btnWake.addEventListener('click',()=>{ if(!wakeLockObj) requestWake(); else releaseWake(); });
+  btnVoice.addEventListener('click',()=>{ voiceOn=!voiceOn; btnVoice.textContent=voiceOn?'🔊 語音開':'🔈 語音'; showToast(voiceOn?'已開啟語音提示':'已關閉語音提示'); });
   function tickLive(userLL){
-    if(!currentRouteCoords.length) return;
-    const dist=haversine(userLL,finalDestLL);
-    const off=nearestDistanceToLine(userLL,currentRouteCoords);
-    const now=Date.now();
-    if(off>80 || now-lastRerouteTs>15000){ lastRerouteTs=now; inlineNavigate(`${userLL[0]},${userLL[1]}`,currentDestQ,currentWpsQ,currentMode); }
+    if(!followOn||!currentRouteCoords.length){ if(followOn&&state.externalUrl) navStatus.textContent='已啟動，等待路線…'; return; }
+    const dist=haversine(userLL,finalDestLL); const off=nearestDistanceToLine(userLL,currentRouteCoords); const now=Date.now();
+    if(off>OFFROUTE_THRESHOLD_M || (now-lastRerouteTs)>REROUTE_INTERVAL_MS){ lastRerouteTs=now; inlineNavigate(`${userLL[0]},${userLL[1]}`,currentDestQ,currentWpsQ,currentMode); speak('重新規劃路線'); }
     navStatus.textContent=`距離終點 ${(dist/1000).toFixed(2)} km｜偏離 ${Math.round(off)} m`;
   }
 
-  // Live 地圖預覽
+  // Live map（預覽）
   const liveMap=document.getElementById('liveMap'), mapFrame=document.getElementById('mapFrame');
-  document.getElementById('btnLocate').addEventListener('click', ()=>{
-    const src=`https://www.google.com/maps?q=${encodeURIComponent(state.origin)}&z=15&hl=zh-TW&output=embed`;
-    mapFrame.src=src; liveMap.hidden=false;
-  });
+  document.getElementById('btnLocate').addEventListener('click',()=>{ const src=`https://www.google.com/maps?q=${encodeURIComponent(state.origin)}&z=15&hl=zh-TW&output=embed`; mapFrame.src=src; liveMap.hidden=false; });
 
-  // 點擊與 Tab
+  // 點擊/切換
   document.addEventListener('click',(e)=>{
     if(e.target.matches('.tab')){ const id=Number(e.target.id.split('-')[1]); showTab(id); window.scrollTo({top:0,behavior:'smooth'}); }
     if(e.target.matches('.nav-btn')){ showTab(Number(e.target.dataset.go)); window.scrollTo({top:0,behavior:'smooth'}); }
     if(e.target.matches('.action.secondary') && e.target.dataset.dest){
       const dest=decodeURIComponent(e.target.dataset.dest); const mode=getMode();
-      if(mode==='transit') openExternal(buildDirURL(state.origin,dest,[],mode));
-      else inlineNavigate(state.origin,dest,[],mode);
+      if(mode==='transit') openExternal(buildDirURL(state.origin,dest,[],mode)); else inlineNavigate(state.origin,dest,[],mode);
     }
     if(e.target.matches('.action') && e.target.dataset.day){
       const id=Number(e.target.dataset.day), mode=e.target.dataset.mode; const d=days.find(x=>x.id===id); if(!d) return;
-      const dest=d.stops[d.stops.length-1]?.q||''; const way=(mode==='dest')?[]:d.stops.slice(0,-1).map(s=>s.q); const travel=getMode();
-      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,way,travel));
-      else inlineNavigate(state.origin,dest,way,travel);
+      const dest=d.stops[d.stops.length-1]?.q||''; const w=(mode==='dest')?[]:d.stops.slice(0,-1).map(s=>s.q); const travel=getMode();
+      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,w,travel)); else inlineNavigate(state.origin,dest,w,travel);
     }
     if(e.target.matches('[data-dest-inline]')){
       const dest=decodeURIComponent(e.target.dataset.destInline); const travel=getMode();
-      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,[],travel));
-      else inlineNavigate(state.origin,dest,[],travel);
+      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,[],travel)); else inlineNavigate(state.origin,dest,[],travel);
     }
   });
-
   function showTab(id){
     document.querySelectorAll('[role="tabpanel"]').forEach(p=>p.hidden=true);
     document.getElementById(`panel-${id}`).hidden=false;
@@ -385,38 +410,27 @@
     document.querySelectorAll('.nav-btn').forEach(n=>n.removeAttribute('aria-current'));
     document.querySelector(`.nav-btn[data-go="${id}"]`).setAttribute('aria-current','page');
   }
-  document.getElementById('btnTodayRoute').addEventListener('click', ()=>{
+  document.getElementById('btnTodayRoute').addEventListener('click',()=>{
     const current=document.querySelector('[role="tabpanel"]:not([hidden])'); if(!current) return;
     const id=Number(current.id.split('-')[1]); const d=days.find(x=>x.id===id); if(!d) return;
     const dest=d.stops[d.stops.length-1]?.q||''; const way=d.stops.slice(0,-1).map(s=>s.q); const travel=getMode();
-    if(travel==='transit') openExternal(buildDirURL(state.origin,dest,way,travel));
-    else inlineNavigate(state.origin,dest,way,travel);
+    if(travel==='transit') openExternal(buildDirURL(state.origin,dest,way,travel)); else inlineNavigate(state.origin,dest,way,travel);
   });
 
-  // ----- 行程管理（新增/刪除/分享/匯出/匯入/重設） -----
-  const mgrOverlay=document.getElementById('mgrOverlay');
-  const mgrBody=document.getElementById('mgrBody');
-  const btnManage=document.getElementById('btnManage');
-  const btnCloseMgr=document.getElementById('btnCloseMgr');
-  const btnAddStop=document.getElementById('btnAddStop');
-  const btnShare=document.getElementById('btnShare');
-  const btnExport=document.getElementById('btnExport');
-  const btnImport=document.getElementById('btnImport');
-  const btnReset=document.getElementById('btnReset');
-
+  // 行程管理
+  const mgrOverlay=document.getElementById('mgrOverlay'), mgrBody=document.getElementById('mgrBody');
+  const btnManage=document.getElementById('btnManage'), btnCloseMgr=document.getElementById('btnCloseMgr');
+  const btnAddStop=document.getElementById('btnAddStop'), btnShare=document.getElementById('btnShare');
+  const btnExport=document.getElementById('btnExport'), btnImport=document.getElementById('btnImport'), btnReset=document.getElementById('btnReset');
   function openManager(){ renderManager(); mgrOverlay.style.display='block'; }
   function closeManager(){ mgrOverlay.style.display='none'; }
-  btnManage.addEventListener('click', openManager);
-  btnCloseMgr.addEventListener('click', closeManager);
+  btnManage.addEventListener('click', openManager); btnCloseMgr.addEventListener('click', closeManager);
 
   function renderManager(){
     let html='';
     days.forEach(d=>{
-      html+=`
-      <div class="card">
-        <div class="row"><div style="font-weight:800">${d.label||('Day '+d.id)}</div>
-          <div>${(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ')}</div>
-        </div>
+      html+=`<div class="card"><div class="row"><div style="font-weight:800">${d.label||('Day '+d.id)}</div>
+        <div>${(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ')}</div></div>
         <ul style="list-style:none;padding:0;margin:8px 0">
           ${(d.stops||[]).map((s,idx)=>`
             <li class="row" style="align-items:flex-start;gap:8px;margin:6px 0">
@@ -425,12 +439,10 @@
               <button class="btn ghost" data-del="${d.id}:${idx}">刪除</button>
             </li>
           `).join('')}
-        </ul>
-      </div>`;
+        </ul></div>`;
     });
     mgrBody.innerHTML=html;
   }
-
   document.addEventListener('click',(e)=>{
     if(e.target.matches('[data-del]')){
       const [dayIdStr,idxStr]=e.target.dataset.del.split(':');
@@ -440,7 +452,6 @@
       saveDays(); rerenderAndSave(); renderManager(); showToast('已刪除站點');
     }
   });
-
   btnAddStop.addEventListener('click',()=>{
     const dayId=Number(prompt('要新增到第幾天？(1-4)')); if(!dayId) return;
     const time=prompt('時間（如 14:00–16:00 或 下午）')||'';
@@ -452,51 +463,34 @@
     saveDays(); rerenderAndSave(); renderManager(); showToast('已新增站點');
   });
 
-  // 分享連結：把行程壓成 Base64 放網址 ?data=
-  function makeShareLink(){
-    const json = JSON.stringify(days);
-    const b64 = btoa(unescape(encodeURIComponent(json)));
-    return location.origin + location.pathname + '?data=' + b64;
+  // 分享連結（含 reset/v；過長改用 #d=）
+  function makeShareLink() {
+    const json=JSON.stringify(days);
+    const b64=btoa(unescape(encodeURIComponent(json)));
+    const urlQ=`${location.origin}${location.pathname}?reset=1&v=${Date.now()}&data=${b64}`;
+    if(urlQ.length<1800) return urlQ;
+    return `${location.origin}${location.pathname}#d=${b64}`;
   }
-  btnShare.addEventListener('click',async ()=>{
-    const url = makeShareLink();
+  btnShare.addEventListener('click',async()=>{
+    const url=makeShareLink();
     try{
-      if(navigator.share){ await navigator.share({title:'行程連結', url}); }
+      if(navigator.share){ await navigator.share({title:'行程連結',url}); }
       else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
-      else { prompt('複製這個連結分享：', url); }
-    }catch(e){
-      prompt('複製這個連結分享：', url);
-    }
+      else { prompt('複製這個連結分享：',url); }
+    }catch{ prompt('複製這個連結分享：',url); }
   });
 
-  btnExport.addEventListener('click',()=>{
-    const blob = new Blob([JSON.stringify(days,null,2)],{type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='itinerary.json'; a.click(); URL.revokeObjectURL(url);
-  });
+  btnExport.addEventListener('click',()=>{ const blob=new Blob([JSON.stringify(days,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='itinerary.json'; a.click(); URL.revokeObjectURL(url); });
+  btnImport.addEventListener('click',()=>{ const str=prompt('貼上 days 陣列 JSON'); if(!str) return; try{ const incoming=JSON.parse(str); if(Array.isArray(incoming)){ localStorage.setItem(LS_KEY, JSON.stringify(incoming)); location.reload(); } else alert('格式錯誤：需為陣列'); }catch{ alert('JSON 解析失敗'); } });
+  btnReset.addEventListener('click',()=>{ if(!confirm('確定將行程重設為預設內容？（會覆蓋目前的自訂）')) return; localStorage.removeItem(LS_KEY); location.reload(); });
 
-  btnImport.addEventListener('click',()=>{
-    const str=prompt('貼上 days 陣列 JSON'); if(!str) return;
-    try{
-      const incoming=JSON.parse(str);
-      if(Array.isArray(incoming)){ localStorage.setItem(LS_KEY, JSON.stringify(incoming)); location.reload(); }
-      else alert('格式錯誤：需為陣列');
-    }catch(e){ alert('JSON 解析失敗'); }
-  });
-
-  btnReset.addEventListener('click',()=>{
-    if(!confirm('確定將行程重設為預設內容？（會覆蓋目前的自訂）')) return;
-    localStorage.removeItem(LS_KEY); location.reload();
-  });
-
-  // 初始渲染與事件
+  // 初始渲染 & 事件
   renderPanels();
-  // 如果是從分享連結載入，提示一下
-  if (window.__importedFromURL) showToast('已從分享連結載入行程');
+  if(window.__importedFromURL) showToast('已從分享連結載入行程');
   if(isSecureContext()) startWatch(); else showToast('建議使用 HTTPS 網址以啟用連續定位');
 
-  // 跨分頁同步（同裝置）
-  window.addEventListener('storage',(e)=>{ if(e.key===LS_KEY){ try{ const next=JSON.parse(e.newValue||'null'); if(Array.isArray(next)){ days=next; renderPanels(); } }catch(_){} }});
+  // 同裝置、跨分頁同步
+  window.addEventListener('storage',(e)=>{ if(e.key===LS_KEY){ try{ const next=JSON.parse(e.newValue||'null'); if(Array.isArray(next)){ days=next; renderPanels(); } }catch{} }});
   </script>
 </body>
 </html>
