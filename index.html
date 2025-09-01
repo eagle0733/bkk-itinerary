@@ -3,12 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <meta name="theme-color" content="#16a34a" />
-  <link rel="manifest" href="manifest.webmanifest" />
-  <title>曼谷行程（內嵌導航 v2.2｜PWA）</title>
+  <title>曼谷行程（內嵌導航 v2.2｜分享連結版）</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <style>
-    :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --chip:#1f2937; --btn:#16a34a; }
+    :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --chip:#1f2937; --btn:#16a34a; }
     *{box-sizing:border-box}
     html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC",sans-serif}
     .container{max-width:960px;margin:0 auto;padding:16px 16px 88px}
@@ -55,8 +53,8 @@
   <header>
     <div class="head-inner">
       <div>
-        <div class="title">曼谷行程（內嵌導航 v2.2｜PWA）</div>
-        <div class="sub">步行/開車：頁面內即時路線與持續定位；大眾運輸：開啟 Google 地圖</div>
+        <div class="title">曼谷行程（內嵌導航 v2.2｜分享連結版）</div>
+        <div class="sub">步行/開車：內嵌即時導航；大眾運輸：開啟 Google 地圖；可新增/刪除/分享行程</div>
       </div>
     </div>
     <div class="tabs" role="tablist" aria-label="Days">
@@ -74,7 +72,6 @@
       <button class="btn" id="btnLocate">📍 顯示目前位置</button>
       <button class="btn" id="btnTodayRoute">🗺️ 從我這裡串起今日路線</button>
       <button class="btn ghost" id="btnManage">🧩 管理行程</button>
-      <button class="btn" id="btnInstall" hidden>➕ 安裝</button>
     </div>
   </header>
 
@@ -94,6 +91,7 @@
     </div>
   </footer>
 
+  <!-- 內嵌導航面板 -->
   <div class="overlay" id="overlay">
     <div class="sheet" role="dialog" aria-modal="true">
       <div class="sheet-head">
@@ -115,12 +113,14 @@
     </div>
   </div>
 
+  <!-- 行程管理面板 -->
   <div class="overlay" id="mgrOverlay">
     <div class="sheet" role="dialog" aria-modal="true">
       <div class="sheet-head">
         <div class="sheet-title">管理行程</div>
         <div>
           <button class="btn ghost" id="btnAddStop">＋ 新增站點</button>
+          <button class="btn ghost" id="btnShare">分享連結</button>
           <button class="btn ghost" id="btnExport">匯出JSON</button>
           <button class="btn ghost" id="btnImport">匯入JSON</button>
           <button class="btn ghost" id="btnReset">重設為預設</button>
@@ -134,15 +134,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-
   <script>
-  // PWA install prompt + SW
-  let deferredPrompt;
-  const installBtn = document.getElementById('btnInstall');
-  window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.hidden=false; });
-  installBtn?.addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; installBtn.hidden=true; });
-  if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js').catch(console.warn); }
+  /* ========= v2.2 + 分享連結（跨裝置匯入） ========= */
 
+  // ----- 預設行程 -----
   const DEFAULT_DAYS = [
     {"id":1,"label":"Day 1｜9/26 (五) ","chips":["抵達日","Siam 區","放鬆按摩"],
      "stops":[
@@ -183,39 +178,50 @@
      ]}
   ];
 
+  // ----- 持久化 & 跨裝置「分享連結」匯入 -----
   const LS_KEY='itinerary_v1';
-  const legacy = localStorage.getItem('customDays');
-  if (legacy && !localStorage.getItem(LS_KEY)) { localStorage.setItem(LS_KEY, legacy); localStorage.removeItem('customDays'); }
-  function loadDays(){ try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } }
+  function loadDays(){ try{ const raw=localStorage.getItem(LS_KEY); return raw?JSON.parse(raw):null; }catch(e){ return null; } }
   function saveDays(){ localStorage.setItem(LS_KEY, JSON.stringify(days)); }
 
-  let days = loadDays();
-  if(!Array.isArray(days)) { days = JSON.parse(JSON.stringify(DEFAULT_DAYS)); saveDays(); }
+  // 若網址帶 ?data=（Base64），就把資料寫入 localStorage，並去掉參數
+  (function tryImportFromURL(){
+    const params = new URLSearchParams(location.search);
+    const encoded = params.get('data');
+    if(!encoded) return;
+    try{
+      const json = decodeURIComponent(escape(atob(encoded)));
+      const incoming = JSON.parse(json);
+      if(Array.isArray(incoming)){
+        localStorage.setItem(LS_KEY, JSON.stringify(incoming));
+        history.replaceState(null,'',location.pathname); // 清掉參數，避免重複匯入
+        window.__importedFromURL = true;
+      }
+    }catch(e){}
+  })();
 
+  let days = loadDays();
+  if(!Array.isArray(days)){ days = JSON.parse(JSON.stringify(DEFAULT_DAYS)); saveDays(); }
+
+  // ----- UI 基本 -----
   const FALLBACK_ORIGIN = 'Samala Hotel Bangkok';
   const panels = document.getElementById('panels');
   const toast = document.getElementById('toast');
-
-  const state = { origin: localStorage.getItem('lastOrigin') || FALLBACK_ORIGIN, watching:false, watchId:null, map:null, routeLayer:null, markers:[], userMarker:null, externalUrl:null };
-
-  function showToast(msg){toast.textContent=msg;toast.style.display='block';setTimeout(()=>toast.style.display='none',2200);}
-  function encodeQ(q){return encodeURIComponent(q);}
-  function isSecureContext(){return location.protocol==='https:'||location.hostname==='localhost';}
-  function getMode(){return document.getElementById('travelMode').value||'transit';}
+  const state = { origin: localStorage.getItem('lastOrigin')||FALLBACK_ORIGIN, map:null, routeLayer:null, markers:[], userMarker:null, externalUrl:null };
+  function showToast(msg){ toast.textContent=msg; toast.style.display='block'; setTimeout(()=>toast.style.display='none',2200); }
+  function encodeQ(q){ return encodeURIComponent(q||''); }
+  function isSecureContext(){ return location.protocol==='https:'||location.hostname==='localhost'; }
+  function getMode(){ return document.getElementById('travelMode').value||'transit'; }
 
   function placeRow(stop){
-    const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q||'')}`;
+    const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q)}`;
     return `
     <div class="card">
-      <div class="row">
-        <div class="time">${stop.time||''}</div>
-        <div class="place">${stop.title||''}</div>
-      </div>
+      <div class="row"><div class="time">${stop.time||''}</div><div class="place">${stop.title||''}</div></div>
       ${stop.note?`<div class="note">${stop.note}</div>`:''}
       <div class="actions">
         <a class="action" target="_blank" rel="noopener" href="${mapUrl}">🗺️ 地點地圖</a>
-        <button class="action secondary" data-dest="${encodeQ(stop.q||'')}">➡️ 由此導航</button>
-        <button class="action" data-dest-inline="${encodeQ(stop.q||'')}">🧭 內嵌導航</button>
+        <button class="action secondary" data-dest="${encodeQ(stop.q)}">➡️ 由此導航</button>
+        <button class="action" data-dest-inline="${encodeQ(stop.q)}">🧭 內嵌導航</button>
       </div>
     </div>`;
   }
@@ -223,17 +229,17 @@
   function renderPanels(){
     panels.innerHTML='';
     days.forEach(d=>{
-      const chips = (d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ');
-      const rows = (d.stops||[]).map(placeRow).join('');
-      const panel = document.createElement('section');
-      panel.id = `panel-${d.id}`;
+      const chips=(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ');
+      const rows=(d.stops||[]).map(placeRow).join('');
+      const panel=document.createElement('section');
+      panel.id=`panel-${d.id}`;
       panel.setAttribute('role','tabpanel');
-      panel.setAttribute('aria-labelledby', `tab-${d.id}`);
-      panel.hidden = d.id !== 1;
-      panel.innerHTML = `
+      panel.setAttribute('aria-labelledby',`tab-${d.id}`);
+      panel.hidden=d.id!==1;
+      panel.innerHTML=`
         <div class="card">
           <div class="row"><div style="font-size:18px;font-weight:800">${d.label||('Day '+d.id)}</div><div>${chips}</div></div>
-          <div class="note">步行/開車 ⇒ 內嵌導航；大眾運輸 ⇒ 轉外部 Google 地圖。可用「🧩 管理行程」新增/刪除/匯入/匯出。</div>
+          <div class="note">步行/開車 ⇒ 內嵌；大眾運輸 ⇒ Google 地圖。用「🧩 管理行程」可新增/刪除/分享/匯出/匯入。</div>
         </div>
         <div class="grid">${rows}</div>
         <div class="route-card">
@@ -248,28 +254,20 @@
   }
   function rerenderAndSave(){ renderPanels(); saveDays(); }
 
+  // ----- 定位追蹤 -----
   function startWatch(){
-    if(!('geolocation' in navigator)){showToast('裝置不支援定位'); state.origin=FALLBACK_ORIGIN; localStorage.setItem('lastOrigin', state.origin); return;}
-    if(state.watching) return;
-    try{
-      state.watchId = navigator.geolocation.watchPosition(pos=>{
-        state.origin = `${pos.coords.latitude},${pos.coords.longitude}`;
-        localStorage.setItem('lastOrigin', state.origin);
-        if(state.map){
-          if(!state.userMarker) state.userMarker = L.marker([pos.coords.latitude,pos.coords.longitude]).addTo(state.map);
-          else state.userMarker.setLatLng([pos.coords.latitude,pos.coords.longitude]);
-          if(followOn) state.map.setView([pos.coords.latitude,pos.coords.longitude], Math.max(state.map.getZoom(), 16));
-        }
-        tickLive([pos.coords.latitude,pos.coords.longitude]);
-      }, err=>{
-        console.warn(err);
-        state.origin = FALLBACK_ORIGIN; localStorage.setItem('lastOrigin', state.origin);
-      }, {enableHighAccuracy:true, timeout:12000, maximumAge:2000});
-      state.watching = true;
-    }catch(e){
-      console.warn(e);
-      state.origin = FALLBACK_ORIGIN; localStorage.setItem('lastOrigin', state.origin);
-    }
+    if(!('geolocation' in navigator)){ showToast('裝置不支援定位'); return; }
+    navigator.geolocation.watchPosition(pos=>{
+      state.origin = `${pos.coords.latitude},${pos.coords.longitude}`;
+      localStorage.setItem('lastOrigin', state.origin);
+      if(state.map){
+        if(!state.userMarker) state.userMarker=L.marker([pos.coords.latitude,pos.coords.longitude]).addTo(state.map);
+        else state.userMarker.setLatLng([pos.coords.latitude,pos.coords.longitude]);
+      }
+      tickLive([pos.coords.latitude,pos.coords.longitude]);
+    }, err=>{
+      console.warn(err);
+    }, {enableHighAccuracy:true, timeout:12000, maximumAge:2000});
   }
 
   function buildDirURL(origin, destination, waypoints, mode){
@@ -277,205 +275,105 @@
     const o=`origin=${encodeURIComponent(origin)}`;
     const d=`destination=${encodeURIComponent(destination)}`;
     const m=`travelmode=${mode}`;
-    const w = waypoints && waypoints.length ? `&waypoints=${waypoints.map(wp=>encodeURIComponent(wp)).join('|')}` : '';
+    const w=waypoints&&waypoints.length?`&waypoints=${waypoints.map(wp=>encodeURIComponent(wp)).join('|')}`:'';
     return `${base}&${o}&${d}${w}&${m}`;
   }
-  function openExternal(url){const win=window.open(url,'_blank'); if(!win) location.href=url;}
+  function openExternal(url){ const win=window.open(url,'_blank'); if(!win) location.href=url; }
 
-  const overlayEl = document.getElementById('overlay');
-  const btnClose = document.getElementById('btnClose');
-  const btnOpenExternal = document.getElementById('btnOpenExternal');
-  function openSheet(){overlayEl.style.display='block'; if(!state.map) initMap();}
-  function closeSheet(){overlayEl.style.display='none';}
+  // ----- 內嵌導航（Leaflet + OSRM） -----
+  const overlayEl=document.getElementById('overlay');
+  const btnClose=document.getElementById('btnClose');
+  const btnOpenExternal=document.getElementById('btnOpenExternal');
+  const navStatus=document.getElementById('navStatus');
+  let followOn=false, lastRerouteTs=0, currentRouteCoords=[], finalDestLL=null, currentDestQ=null, currentWpsQ=[], currentMode=null;
+  const REROUTE_INTERVAL_MS=15000, OFFROUTE_THRESHOLD_M=80;
+
+  function openSheet(){ overlayEl.style.display='block'; if(!state.map) initMap(); }
+  function closeSheet(){ overlayEl.style.display='none'; }
   btnClose.addEventListener('click', closeSheet);
   btnOpenExternal.addEventListener('click', ()=>{ if(state.externalUrl) openExternal(state.externalUrl); });
 
   function initMap(){
     state.map = L.map('map');
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(state.map);
-    state.map.setView([13.7563, 100.5018], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(state.map);
+    state.map.setView([13.7563,100.5018], 12);
   }
-
   async function geocode(q){
-    const llMatch = q && q.match?.(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/);
-    if(llMatch) return [parseFloat(llMatch[1]), parseFloat(llMatch[2])];
-    const cacheKey = 'gc_'+q;
-    const cached = localStorage.getItem(cacheKey);
-    if(cached){ try { const arr = JSON.parse(cached); if(Array.isArray(arr)&&arr.length===2) return arr; } catch(e){} }
-    const controller = new AbortController();
-    const timeout = setTimeout(()=>controller.abort(), 8000);
+    const m=q && q.match?.(/^\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*$/);
+    if(m) return [parseFloat(m[1]),parseFloat(m[3])];
+    const cacheKey='gc_'+q; const cached=localStorage.getItem(cacheKey);
+    if(cached){ try{ const v=JSON.parse(cached); if(Array.isArray(v)&&v.length===2) return v; }catch(e){} }
+    const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),8000);
     try{
-      const url1 = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=zh-TW`;
-      const r1 = await fetch(url1, {signal: controller.signal});
-      if(r1.ok){
-        const j1 = await r1.json();
-        if(j1.features && j1.features[0]){
-          const [lng, lat] = j1.features[0].geometry.coordinates;
-          clearTimeout(timeout);
-          localStorage.setItem(cacheKey, JSON.stringify([lat,lng]));
-          return [lat,lng];
-        }
-      }
+      const r1=await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lang=zh-TW`,{signal:ctl.signal});
+      if(r1.ok){ const j1=await r1.json(); if(j1.features&&j1.features[0]){ const [lng,lat]=j1.features[0].geometry.coordinates; clearTimeout(t); localStorage.setItem(cacheKey,JSON.stringify([lat,lng])); return [lat,lng]; } }
     }catch(e){}
     try{
-      const url2 = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
-      const r2 = await fetch(url2, {headers:{'Accept':'application/json'}, referrerPolicy:'no-referrer', signal: controller.signal});
-      if(r2.ok){
-        const j2 = await r2.json();
-        if(j2 && j2[0]){
-          clearTimeout(timeout);
-          const lat = parseFloat(j2[0].lat), lon = parseFloat(j2[0].lon);
-          localStorage.setItem(cacheKey, JSON.stringify([lat,lon]));
-          return [lat,lon];
-        }
-      }
+      const r2=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`,{headers:{'Accept':'application/json'},referrerPolicy:'no-referrer',signal:ctl.signal});
+      if(r2.ok){ const j2=await r2.json(); if(j2&&j2[0]){ clearTimeout(t); const lat=parseFloat(j2[0].lat), lon=parseFloat(j2[0].lon); localStorage.setItem(cacheKey,JSON.stringify([lat,lon])); return [lat,lon]; } }
     }catch(e){}
-    clearTimeout(timeout);
-    throw new Error('GEOCODE_FAIL');
+    clearTimeout(t); throw new Error('GEOCODE_FAIL');
   }
-
   async function osrmRoute(coords, profile){
-    const points = coords.map(([lat,lng])=>`${lng},${lat}`).join(';');
-    const url = `https://router.project-osrm.org/route/v1/${profile}/${points}?overview=full&geometries=geojson&steps=true`;
-    const r = await fetch(url);
-    const j = await r.json();
-    if(j.code!=='Ok') throw new Error('OSRM error');
-    return j.routes[0];
+    const pts=coords.map(([lat,lng])=>`${lng},${lat}`).join(';');
+    const url=`https://router.project-osrm.org/route/v1/${profile}/${pts}?overview=full&geometries=geojson&steps=true`;
+    const r=await fetch(url); const j=await r.json(); if(j.code!=='Ok') throw new Error('OSRM error'); return j.routes[0];
   }
-
-  function clearRoute(){
-    if(state.routeLayer){state.map.removeLayer(state.routeLayer); state.routeLayer=null;}
-    state.markers.forEach(m=>state.map.removeLayer(m)); state.markers=[];
-  }
-
+  function clearRoute(){ if(state.routeLayer){state.map.removeLayer(state.routeLayer); state.routeLayer=null;} state.markers.forEach(m=>state.map.removeLayer(m)); state.markers=[]; }
   async function inlineNavigate(originQ, destQ, waypointsQ, mode){
     const profile = mode==='walking' ? 'foot' : 'driving';
     try{
-      openSheet();
-      clearRoute();
-      let originLL;
-      try{ originLL = await geocode(originQ); }
-      catch(e){ showToast('無法解析目前位置，改用飯店起點'); originLL = await geocode(FALLBACK_ORIGIN); }
-      const wpLLs = [];
-      for(const w of (waypointsQ||[])){
-        try{ wpLLs.push(await geocode(w)); } catch(e){ showToast('部分站點解析失敗，略過'); }
-      }
-      let destLL;
-      try{ destLL = await geocode(destQ); }
-      catch(e){ showToast('目的地解析失敗，改外開 Google 地圖'); openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
-      const all = [originLL, ...wpLLs, destLL];
-      if(all.length < 2){ showToast('座標不足，改外開 Google 地圖'); openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
-      const route = await osrmRoute(all, profile);
-      const line = L.geoJSON(route.geometry).addTo(state.map);
-      state.routeLayer = line;
-      const startM = L.marker(originLL).addTo(state.map);
-      const endM = L.marker(destLL).addTo(state.map);
-      state.markers.push(startM, endM);
-      wpLLs.forEach(ll=>state.markers.push(L.circleMarker(ll,{radius:6}).addTo(state.map)));
-      state.map.fitBounds(line.getBounds(), {padding:[30,30]});
-      state.externalUrl = buildDirURL(originQ, destQ, waypointsQ, mode==='walking'?'walking':'driving');
-
-      setCurrentRoute(route, destLL);
-      currentDestQ = destQ; currentWpsQ = waypointsQ||[]; currentMode = mode;
-      lastRerouteTs = Date.now();
-      navStatus.textContent='路線已建立，您可以開始移動。';
-    }catch(e){
-      console.warn(e);
-      showToast('內嵌路線服務繁忙或被限制，已改用 Google 地圖');
-      openExternal(buildDirURL(originQ, destQ, waypointsQ, mode));
-    }
+      openSheet(); clearRoute();
+      let originLL; try{ originLL=await geocode(originQ); }catch(e){ originLL=await geocode(FALLBACK_ORIGIN); }
+      const wp=[]; for(const w of (waypointsQ||[])){ try{ wp.push(await geocode(w)); }catch(e){} }
+      let destLL; try{ destLL=await geocode(destQ); }catch(e){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
+      const all=[originLL,...wp,destLL]; if(all.length<2){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); return; }
+      const route=await osrmRoute(all, profile);
+      const line=L.geoJSON(route.geometry).addTo(state.map); state.routeLayer=line;
+      state.map.fitBounds(line.getBounds(),{padding:[30,30]});
+      state.externalUrl=buildDirURL(originQ,destQ,waypointsQ,mode==='walking'?'walking':'driving');
+      setCurrentRoute(route, destLL); currentDestQ=destQ; currentWpsQ=waypointsQ||[]; currentMode=mode; lastRerouteTs=Date.now(); navStatus.textContent='路線已建立，您可以開始移動。';
+    }catch(e){ openExternal(buildDirURL(originQ,destQ,waypointsQ,mode)); }
   }
-
+  function setCurrentRoute(route,destLL){ currentRouteCoords=route.geometry.coordinates.map(([lng,lat])=>[lat,lng]); finalDestLL=destLL; }
   function toRad(x){return x*Math.PI/180;}
-  function haversine(a,b){
-    const R=6371000;
-    const dLat=toRad(b[0]-a[0]), dLon=toRad(b[1]-a[1]);
-    const lat1=toRad(a[0]), lat2=toRad(b[0]);
-    const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
-    return 2*R*Math.asin(Math.sqrt(h));
-  }
-  function nearestDistanceToLine(point, lineCoords){
-    let min=Infinity;
-    for(const p of lineCoords){ const d=haversine(point,p); if(d<min) min=d; }
-    return min;
-  }
-  let wakeLockObj=null;
-  async function requestWake(){ try{ wakeLockObj = await navigator.wakeLock.request('screen'); showToast('已啟用常亮'); }catch(e){ showToast('常亮啟用失敗'); } }
-  function releaseWake(){ try{ wakeLockObj && wakeLockObj.release(); wakeLockObj=null; showToast('已關閉常亮'); }catch(e){} }
-  let voiceOn=false;
-  function speak(text){ if(!voiceOn) return; try{ const u=new SpeechSynthesisUtterance(text); u.lang='zh-TW'; speechSynthesis.cancel(); speechSynthesis.speak(u);}catch(e){} }
-
-  const navStatus = document.getElementById('navStatus');
-  const btnFollow = document.getElementById('btnFollow');
-  const btnWake = document.getElementById('btnWake');
-  const btnVoice = document.getElementById('btnVoice');
-
-  let followOn=false;
-  let lastRerouteTs=0;
-  const REROUTE_INTERVAL_MS=15000;
-  const OFFROUTE_THRESHOLD_M=80;
-  let currentDestQ=null, currentWpsQ=[], currentMode=null;
-  let currentRouteCoords=[];
-  let finalDestLL=null;
-
-  btnFollow.addEventListener('click', ()=>{
-    followOn=!followOn;
-    btnFollow.textContent = followOn ? '🛑 停止即時導航' : '🔔 開始即時導航';
-    if(followOn){ speak('開始即時導航'); navStatus.textContent='即時導航啟動中…'; }
-    else{ navStatus.textContent='已停止即時導航'; }
-  });
-  btnWake.addEventListener('click', ()=>{ if(!wakeLockObj) requestWake(); else releaseWake(); });
-  btnVoice.addEventListener('click', ()=>{ voiceOn=!voiceOn; btnVoice.textContent = voiceOn ? '🔊 語音開' : '🔈 語音'; showToast(voiceOn?'已開啟語音提示':'已關閉語音提示'); });
-
-  function setCurrentRoute(route, destLL){
-    currentRouteCoords = route.geometry.coordinates.map(([lng,lat])=>[lat,lng]);
-    finalDestLL = destLL;
-  }
+  function haversine(a,b){ const R=6371000; const dLat=toRad(b[0]-a[0]), dLon=toRad(b[1]-a[1]); const lat1=toRad(a[0]), lat2=toRad(b[0]); const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
+  function nearestDistanceToLine(point,line){ let min=Infinity; for(const p of line){ const d=haversine(point,p); if(d<min) min=d; } return min; }
   function tickLive(userLL){
-    if(!followOn || !currentRouteCoords.length){ if(followOn && state.externalUrl) navStatus.textContent='已啟動，等待路線…'; return; }
-    const distToDest = haversine(userLL, finalDestLL);
-    const dToRoute = nearestDistanceToLine(userLL, currentRouteCoords);
-    const now = Date.now();
-    if(dToRoute > OFFROUTE_THRESHOLD_M || (now - lastRerouteTs) > REROUTE_INTERVAL_MS){
-      lastRerouteTs = now;
-      const originQ = `${userLL[0]},${userLL[1]}`;
-      inlineNavigate(originQ, currentDestQ, currentWpsQ, currentMode);
-      speak('重新規劃路線');
-    }
-    navStatus.textContent = `距離終點約 ${(distToDest/1000).toFixed(2)} km｜偏離路線 ${Math.round(dToRoute)} m`;
+    if(!currentRouteCoords.length) return;
+    const dist=haversine(userLL,finalDestLL);
+    const off=nearestDistanceToLine(userLL,currentRouteCoords);
+    const now=Date.now();
+    if(off>80 || now-lastRerouteTs>15000){ lastRerouteTs=now; inlineNavigate(`${userLL[0]},${userLL[1]}`,currentDestQ,currentWpsQ,currentMode); }
+    navStatus.textContent=`距離終點 ${(dist/1000).toFixed(2)} km｜偏離 ${Math.round(off)} m`;
   }
 
-  const liveMap = document.getElementById('liveMap');
-  const mapFrame = document.getElementById('mapFrame');
+  // Live 地圖預覽
+  const liveMap=document.getElementById('liveMap'), mapFrame=document.getElementById('mapFrame');
   document.getElementById('btnLocate').addEventListener('click', ()=>{
-    const src = `https://www.google.com/maps?q=${encodeURIComponent(state.origin)}&z=15&hl=zh-TW&output=embed`;
-    mapFrame.src = src; liveMap.hidden = false;
+    const src=`https://www.google.com/maps?q=${encodeURIComponent(state.origin)}&z=15&hl=zh-TW&output=embed`;
+    mapFrame.src=src; liveMap.hidden=false;
   });
 
-  document.addEventListener('click', (e)=>{
-    if(e.target.matches('.tab')){ const id = Number(e.target.id.split('-')[1]); showTab(id); window.scrollTo({top:0,behavior:'smooth'}); }
+  // 點擊與 Tab
+  document.addEventListener('click',(e)=>{
+    if(e.target.matches('.tab')){ const id=Number(e.target.id.split('-')[1]); showTab(id); window.scrollTo({top:0,behavior:'smooth'}); }
     if(e.target.matches('.nav-btn')){ showTab(Number(e.target.dataset.go)); window.scrollTo({top:0,behavior:'smooth'}); }
     if(e.target.matches('.action.secondary') && e.target.dataset.dest){
-      const dest = decodeURIComponent(e.target.dataset.dest);
-      const mode = getMode();
-      if(mode==='transit'){ openExternal(buildDirURL(state.origin, dest, [], mode)); }
-      else { inlineNavigate(state.origin, dest, [], mode); }
+      const dest=decodeURIComponent(e.target.dataset.dest); const mode=getMode();
+      if(mode==='transit') openExternal(buildDirURL(state.origin,dest,[],mode));
+      else inlineNavigate(state.origin,dest,[],mode);
     }
-    if(e.target.matches('.action') && e.target.dataset.day)){
-      const id = Number(e.target.dataset.day);
-      const mode = e.target.dataset.mode;
-      const d = days.find(x=>x.id===id); if(!d) return;
-      const dest = d.stops[d.stops.length-1]?.q || '';
-      const waypoints = (mode==='dest') ? [] : d.stops.slice(0,-1).map(s=>s.q);
-      const travel = getMode();
-      if(travel==='transit'){ openExternal(buildDirURL(state.origin, dest, waypoints, travel)); }
-      else { inlineNavigate(state.origin, dest, waypoints, travel); }
+    if(e.target.matches('.action') && e.target.dataset.day){
+      const id=Number(e.target.dataset.day), mode=e.target.dataset.mode; const d=days.find(x=>x.id===id); if(!d) return;
+      const dest=d.stops[d.stops.length-1]?.q||''; const way=(mode==='dest')?[]:d.stops.slice(0,-1).map(s=>s.q); const travel=getMode();
+      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,way,travel));
+      else inlineNavigate(state.origin,dest,way,travel);
     }
     if(e.target.matches('[data-dest-inline]')){
-      const dest = decodeURIComponent(e.target.dataset.destInline);
-      const travel = getMode();
-      if(travel==='transit') openExternal(buildDirURL(state.origin, dest, [], travel));
-      else inlineNavigate(state.origin, dest, [], travel);
+      const dest=decodeURIComponent(e.target.dataset.destInline); const travel=getMode();
+      if(travel==='transit') openExternal(buildDirURL(state.origin,dest,[],travel));
+      else inlineNavigate(state.origin,dest,[],travel);
     }
   });
 
@@ -487,27 +385,24 @@
     document.querySelectorAll('.nav-btn').forEach(n=>n.removeAttribute('aria-current'));
     document.querySelector(`.nav-btn[data-go="${id}"]`).setAttribute('aria-current','page');
   }
-
   document.getElementById('btnTodayRoute').addEventListener('click', ()=>{
-    const current = document.querySelector('[role="tabpanel"]:not([hidden])');
-    if(!current) return;
-    const id = Number(current.id.split('-')[1]);
-    const d = days.find(x=>x.id===id); if(!d) return;
-    const dest = d.stops[d.stops.length-1]?.q || '';
-    const waypoints = d.stops.slice(0,-1).map(s=>s.q);
-    const travel = getMode();
-    if(travel==='transit'){ openExternal(buildDirURL(state.origin, dest, waypoints, travel)); }
-    else { inlineNavigate(state.origin, dest, waypoints, travel); }
+    const current=document.querySelector('[role="tabpanel"]:not([hidden])'); if(!current) return;
+    const id=Number(current.id.split('-')[1]); const d=days.find(x=>x.id===id); if(!d) return;
+    const dest=d.stops[d.stops.length-1]?.q||''; const way=d.stops.slice(0,-1).map(s=>s.q); const travel=getMode();
+    if(travel==='transit') openExternal(buildDirURL(state.origin,dest,way,travel));
+    else inlineNavigate(state.origin,dest,way,travel);
   });
 
-  const mgrOverlay = document.getElementById('mgrOverlay');
-  const mgrBody = document.getElementById('mgrBody');
-  const btnManage = document.getElementById('btnManage');
-  const btnCloseMgr = document.getElementById('btnCloseMgr');
-  const btnAddStop = document.getElementById('btnAddStop');
-  const btnExport = document.getElementById('btnExport');
-  const btnImport = document.getElementById('btnImport');
-  const btnReset = document.getElementById('btnReset');
+  // ----- 行程管理（新增/刪除/分享/匯出/匯入/重設） -----
+  const mgrOverlay=document.getElementById('mgrOverlay');
+  const mgrBody=document.getElementById('mgrBody');
+  const btnManage=document.getElementById('btnManage');
+  const btnCloseMgr=document.getElementById('btnCloseMgr');
+  const btnAddStop=document.getElementById('btnAddStop');
+  const btnShare=document.getElementById('btnShare');
+  const btnExport=document.getElementById('btnExport');
+  const btnImport=document.getElementById('btnImport');
+  const btnReset=document.getElementById('btnReset');
 
   function openManager(){ renderManager(); mgrOverlay.style.display='block'; }
   function closeManager(){ mgrOverlay.style.display='none'; }
@@ -515,87 +410,93 @@
   btnCloseMgr.addEventListener('click', closeManager);
 
   function renderManager(){
-    let html = '';
+    let html='';
     days.forEach(d=>{
-      html += `
-        <div class="card">
-          <div class="row"><div style="font-weight:800">${d.label||('Day '+d.id)}</div>
-            <div>${(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ')}</div>
-          </div>
-          <ul style="list-style:none;padding:0;margin:8px 0">
-            ${(d.stops||[]).map((s,idx)=>`
-              <li class="row" style="align-items:flex-start;gap:8px;margin:6px 0">
-                <div class="time" style="min-width:96px">${s.time||''}</div>
-                <div style="flex:1">
-                  <div class="place">${s.title||''}</div>
-                  <div class="note">${s.q||''}${s.note?`｜${s.note}`:''}</div>
-                </div>
-                <button class="btn ghost" data-del="${d.id}:${idx}">刪除</button>
-              </li>
-            `).join('')}
-          </ul>
-        </div>`;
+      html+=`
+      <div class="card">
+        <div class="row"><div style="font-weight:800">${d.label||('Day '+d.id)}</div>
+          <div>${(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ')}</div>
+        </div>
+        <ul style="list-style:none;padding:0;margin:8px 0">
+          ${(d.stops||[]).map((s,idx)=>`
+            <li class="row" style="align-items:flex-start;gap:8px;margin:6px 0">
+              <div class="time" style="min-width:96px">${s.time||''}</div>
+              <div style="flex:1"><div class="place">${s.title||''}</div><div class="note">${s.q||''}${s.note?`｜${s.note}`:''}</div></div>
+              <button class="btn ghost" data-del="${d.id}:${idx}">刪除</button>
+            </li>
+          `).join('')}
+        </ul>
+      </div>`;
     });
-    mgrBody.innerHTML = html;
+    mgrBody.innerHTML=html;
   }
 
-  document.addEventListener('click', (e)=>{
+  document.addEventListener('click',(e)=>{
     if(e.target.matches('[data-del]')){
-      const [dayIdStr, idxStr] = e.target.dataset.del.split(':');
-      const d = days.find(x=>x.id === Number(dayIdStr));
-      if(!d) return;
+      const [dayIdStr,idxStr]=e.target.dataset.del.split(':');
+      const d=days.find(x=>x.id===Number(dayIdStr)); if(!d) return;
       if(!confirm('確定刪除此站點？')) return;
       d.stops.splice(Number(idxStr),1);
-      saveDays();
-      rerenderAndSave();
-      renderManager();
-      showToast('已刪除站點');
+      saveDays(); rerenderAndSave(); renderManager(); showToast('已刪除站點');
     }
   });
 
-  btnAddStop.addEventListener('click', ()=>{
-    const dayId = Number(prompt('要新增到第幾天？(1-4)'));
-    if(!dayId) return;
-    const time = prompt('時間（如 14:00–16:00 或 下午）') || '';
-    const title = prompt('標題（顯示用）') || '未命名';
-    const q = prompt('導航關鍵字或經緯度（如 "Siam Paragon" 或 "13.7467,100.5349"）') || '';
-    const note = prompt('備註（可空白）') || '';
-    const d = days.find(x=>x.id===dayId); if(!d) return alert('找不到指定天數');
+  btnAddStop.addEventListener('click',()=>{
+    const dayId=Number(prompt('要新增到第幾天？(1-4)')); if(!dayId) return;
+    const time=prompt('時間（如 14:00–16:00 或 下午）')||'';
+    const title=prompt('標題（顯示用）')||'未命名';
+    const q=prompt('導航關鍵字或經緯度（如 "Siam Paragon" 或 "13.7467,100.5349"）')||'';
+    const note=prompt('備註（可空白）')||'';
+    const d=days.find(x=>x.id===dayId); if(!d) return alert('找不到指定天數');
     d.stops.push({time,title,q,note});
-    saveDays();
-    rerenderAndSave();
-    renderManager();
-    showToast('已新增站點');
+    saveDays(); rerenderAndSave(); renderManager(); showToast('已新增站點');
   });
 
-  btnExport.addEventListener('click', ()=>{
-    const blob = new Blob([JSON.stringify(days,null,2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download='itinerary.json'; a.click(); URL.revokeObjectURL(url);
-  });
-
-  btnImport.addEventListener('click', ()=>{
-    const str = prompt('貼上 days 陣列 JSON'); if(!str) return;
+  // 分享連結：把行程壓成 Base64 放網址 ?data=
+  function makeShareLink(){
+    const json = JSON.stringify(days);
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    return location.origin + location.pathname + '?data=' + b64;
+  }
+  btnShare.addEventListener('click',async ()=>{
+    const url = makeShareLink();
     try{
-      const incoming = JSON.parse(str);
+      if(navigator.share){ await navigator.share({title:'行程連結', url}); }
+      else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
+      else { prompt('複製這個連結分享：', url); }
+    }catch(e){
+      prompt('複製這個連結分享：', url);
+    }
+  });
+
+  btnExport.addEventListener('click',()=>{
+    const blob = new Blob([JSON.stringify(days,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='itinerary.json'; a.click(); URL.revokeObjectURL(url);
+  });
+
+  btnImport.addEventListener('click',()=>{
+    const str=prompt('貼上 days 陣列 JSON'); if(!str) return;
+    try{
+      const incoming=JSON.parse(str);
       if(Array.isArray(incoming)){ localStorage.setItem(LS_KEY, JSON.stringify(incoming)); location.reload(); }
       else alert('格式錯誤：需為陣列');
     }catch(e){ alert('JSON 解析失敗'); }
   });
 
-  btnReset.addEventListener('click', ()=>{
+  btnReset.addEventListener('click',()=>{
     if(!confirm('確定將行程重設為預設內容？（會覆蓋目前的自訂）')) return;
-    localStorage.removeItem(LS_KEY);
-    location.reload();
+    localStorage.removeItem(LS_KEY); location.reload();
   });
 
-  window.addEventListener('beforeunload', saveDays);
-  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveDays(); });
-  window.addEventListener('storage', (e)=>{ if(e.key===LS_KEY){ days = loadDays() || days; rerenderAndSave(); } });
+  // 初始渲染與事件
+  renderPanels();
+  // 如果是從分享連結載入，提示一下
+  if (window.__importedFromURL) showToast('已從分享連結載入行程');
+  if(isSecureContext()) startWatch(); else showToast('建議使用 HTTPS 網址以啟用連續定位');
 
-  rerenderAndSave();
-  if(isSecureContext()) startWatch(); else showToast('非 HTTPS/localhost：定位可能不準，建議用 HTTPS 網址');
+  // 跨分頁同步（同裝置）
+  window.addEventListener('storage',(e)=>{ if(e.key===LS_KEY){ try{ const next=JSON.parse(e.newValue||'null'); if(Array.isArray(next)){ days=next; renderPanels(); } }catch(_){} }});
   </script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 </body>
 </html>
