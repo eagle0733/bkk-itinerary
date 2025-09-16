@@ -3,89 +3,91 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-<title>曼谷行程（無金鑰・無外部JS）</title>
+<title>曼谷行程｜內嵌導航（Google API）</title>
 <meta name="theme-color" content="#0f172a" />
 <style>
   :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --chip:#1f2937; --btn:#16a34a; }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC",sans-serif}
-  .container{max-width:1100px;margin:0 auto;padding:16px 16px 96px}
-  header{position:sticky;top:0;z-index:50;background:linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.75));backdrop-filter:blur(8px);border-bottom:1px solid rgba(148,163,184,.15)}
-  .head-inner{display:flex;gap:12px;align-items:center;padding:12px 16px}
-  .title{font-size:18px;font-weight:700}
+  header{position:sticky;top:0;z-index:30;background:linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.75));backdrop-filter:blur(8px);border-bottom:1px solid rgba(148,163,184,.15)}
+  .head{display:flex;gap:12px;align-items:center;padding:12px 16px}
+  .title{font-size:18px;font-weight:800}
   .sub{font-size:12px;color:var(--muted)}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px}
+  .btn,.select{border:none;border-radius:12px;padding:10px 12px;font-weight:700}
+  .btn{background:var(--btn);color:white;cursor:pointer}
+  .ghost{background:transparent;border:1px solid rgba(255,255,255,.2);color:var(--text)}
   .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px 16px}
   .tab{padding:10px;border-radius:12px;background:var(--chip);color:var(--text);text-align:center;font-weight:700;border:1px solid rgba(255,255,255,.08);cursor:pointer}
   .tab[aria-selected="true"]{background:var(--btn);border-color:transparent}
-  .controls{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px 12px}
-  .select,.btn{border:none;border-radius:12px;padding:10px 12px;font-weight:600}
-  .select{background:var(--chip);color:var(--text)}
-  .btn{background:var(--btn);color:white;cursor:pointer}
-  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--text)}
-  .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:14px;margin:10px 0}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-  .time{font-weight:800;letter-spacing:.2px;min-width:86px}
-  .place{font-weight:700}
-  .note{color:var(--muted);font-size:12px;margin-top:4px}
-  .actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-  .action{flex:1;background:#0b5b2f;color:white;border-radius:12px;border:1px solid rgba(255,255,255,.12);padding:10px 12px;text-align:center;font-weight:700;cursor:pointer}
-  .action.secondary{background:#0f766e}
-  .route-card{background:#0b1220;border-radius:16px;border:1px dashed rgba(148,163,184,.25);padding:12px;margin-top:14px}
+  .container{max-width:1180px;margin:0 auto;padding:16px 16px 96px}
+  .grid{display:grid;grid-template-columns:1fr 420px;gap:12px}
+  @media (max-width:980px){ .grid{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px}
   .pill{display:inline-flex;align-items:center;gap:6px;background:#0b1220;border:1px solid rgba(255,255,255,.1);padding:6px 10px;border-radius:999px;font-size:12px;color:var(--muted)}
-  .grid{display:grid;gap:10px}
-  @media (min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
-  .mapbox{margin-top:14px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
-  iframe{width:100%;height:360px;border:0}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .time{font-weight:800;min-width:90px}
+  .place{font-weight:800}
+  .note{font-size:12px;color:var(--muted);margin-top:4px}
+  .actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .action{flex:1;background:#0b5b2f;color:white;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px;text-align:center;font-weight:800;cursor:pointer}
+  .secondary{background:#0f766e}
+  #map{height:56vh;border-radius:14px;border:1px solid rgba(255,255,255,.12)}
+  #panel{height:56vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,.12);padding:8px}
+  .eta{margin-top:8px;font-weight:800}
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:70px;background:#0b1220;color:#e5e7eb;border:1px solid rgba(255,255,255,.12);padding:10px 14px;border-radius:12px;font-size:12px;display:none;z-index:120}
+  .error{position:fixed;top:56px;left:0;right:0;background:#7f1d1d;color:#fff;padding:10px 14px;font-size:12px;display:none;z-index:60;text-align:center}
+  input[type="text"]{background:#0b1220;color:#e5e7eb;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:10px 12px;font-weight:600;width:280px}
 </style>
 </head>
 <body>
-  <header>
-    <div class="head-inner">
-      <div>
-        <div class="title">曼谷行程（無金鑰・無外部JS）</div>
-        <div class="sub">外開 Apple/Google/OSM 導航；內嵌地圖使用 Google-Embed 或 OSM-Embed，不需任何 API Key</div>
-      </div>
-      <div style="margin-left:auto;display:flex;gap:8px">
-        <select id="embedProvider" class="select" title="內嵌地圖來源">
-          <option value="google" selected>內嵌：Google</option>
-          <option value="osm">內嵌：OSM</option>
-        </select>
-        <button class="btn ghost" id="btnInstall" title="加入主畫面">📲 安裝</button>
-      </div>
+<header>
+  <div class="head">
+    <div>
+      <div class="title">曼谷行程｜內嵌導航（Google）</div>
+      <div class="sub">即時定位＋內嵌地圖；走路/開車/大眾運輸可切換；外開備援統一 Google 地圖</div>
     </div>
-
-    <div class="tabs" role="tablist" aria-label="Days">
-      <button class="tab" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true">Day 1｜9/26 (五)</button>
-      <button class="tab" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false">Day 2｜9/27 (六)</button>
-      <button class="tab" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false">Day 3｜9/28 (日)</button>
-      <button class="tab" role="tab" id="tab-4" aria-controls="panel-4" aria-selected="false">Day 4｜9/29 (一)</button>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <input id="apiKeyInput" type="text" placeholder="貼上 Google API Key（或用 ?gkey=）" />
+      <button class="btn ghost" id="btnSaveKey">儲存金鑰</button>
     </div>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Days">
+    <button class="tab" id="tab-1" aria-controls="panel-1" aria-selected="true">Day 1｜9/26 (五)</button>
+    <button class="tab" id="tab-2" aria-controls="panel-2" aria-selected="false">Day 2｜9/27 (六)</button>
+    <button class="tab" id="tab-3" aria-controls="panel-3" aria-selected="false">Day 3｜9/28 (日)</button>
+    <button class="tab" id="tab-4" aria-controls="panel-4" aria-selected="false">Day 4｜9/29 (一)</button>
+  </div>
+  <div class="bar">
+    <select id="mode" class="select">
+      <option value="DRIVING">開車</option>
+      <option value="WALKING">步行</option>
+      <option value="TRANSIT">大眾運輸</option>
+    </select>
+    <button class="btn" id="btnRecenter">🎯 回到我的位置</button>
+    <button class="btn ghost" id="btnStop">🛑 停止導航</button>
+    <button class="btn ghost" id="btnShare">分享整份行程</button>
+  </div>
+</header>
 
-    <div class="controls">
-      <select id="travelMode" class="select" aria-label="導航模式">
-        <option value="walk">步行（外開）</option>
-        <option value="drive">開車（外開）</option>
-      </select>
-      <button class="btn" id="btnLocate">📍 顯示目前位置</button>
-      <button class="btn" id="btnTodayRoute">🗺️ 從我這裡串起今日路線</button>
-      <button class="btn ghost" id="btnAdd">＋新增站點</button>
-      <button class="btn ghost" id="btnDel">刪除站點</button>
-      <button class="btn ghost" id="btnShare">分享連結</button>
+<div class="container">
+  <div class="grid">
+    <div>
+      <div id="itins"></div>
     </div>
-  </header>
-
-  <main class="container">
-    <div id="panels"></div>
-    <div class="mapbox" id="liveMap" hidden>
-      <iframe id="mapFrame" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <div>
+      <div id="map" class="card"></div>
+      <div class="card eta" id="etaBox">尚未開始導航</div>
+      <div id="panel" class="card"></div>
     </div>
-  </main>
+  </div>
+</div>
 
-  <div class="toast" id="toast"></div>
+<div class="toast" id="toast"></div>
+<div class="error" id="errorbar"></div>
 
 <script>
-/* ===== 基本資料（過濾純交通段） ===== */
+/* =================== 行程資料（已過濾純交通段） =================== */
 const DEFAULT_DAYS = [
   { id:1,label:'Day 1｜9/26 (五)',chips:['Asok｜Erawan','Chula','按摩'],stops:[
     {time:'13:00–14:00',title:'Terminal 21 購物',q:'Terminal 21 Asok',note:''},
@@ -114,146 +116,71 @@ const DEFAULT_DAYS = [
     {time:'12:00–14:00',title:'Big C／暹羅廣場 逛街',q:'Big C Ratchadamri or Siam Square',note:''}
   ]}
 ];
+const LS_KEY='itinerary_gmaps_pwa_v1';
+const KEY_KEY='gmaps_api_key';
+function loadDays(){ try{const r=localStorage.getItem(LS_KEY); return r?JSON.parse(r):null;}catch{return null} }
+function saveDays(d){ localStorage.setItem(LS_KEY, JSON.stringify(d)); }
+function ensureDays(d){ return (Array.isArray(d)&&d.length)? d: JSON.parse(JSON.stringify(DEFAULT_DAYS)); }
 
-const LS_KEY='itinerary_embed_noapi_v1';
-(function(){const qs=new URLSearchParams(location.search);if(qs.get('reset')==='1')localStorage.removeItem(LS_KEY);})();
-function ensureValidDays(d){if(!Array.isArray(d)||!d.length)return null;for(const x of d){if(!x||!('id'in x)||!Array.isArray(x.stops))return null;}return d;}
-function loadRaw(){try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r):null;}catch{return null}}
-function save(){localStorage.setItem(LS_KEY,JSON.stringify(days));}
-(function tryImportFromURL(){
-  const qs=new URLSearchParams(location.search);let e=qs.get('data');if(!e&&location.hash.startsWith('#d='))e=location.hash.slice(3);
-  if(!e)return;try{const json=decodeURIComponent(escape(atob(e)));const data=JSON.parse(json);
-  if(Array.isArray(data)&&data.length){localStorage.setItem(LS_KEY,JSON.stringify(data));history.replaceState(null,'',location.pathname);location.reload();}}catch{}
+// 讀取金鑰：?gkey= 或 localStorage
+(function initKey(){
+  const qs=new URLSearchParams(location.search); const k=qs.get('gkey');
+  if(k){ localStorage.setItem(KEY_KEY,k); }
+  const saved=localStorage.getItem(KEY_KEY) || k || '';
+  document.getElementById('apiKeyInput').value=saved;
 })();
-let days=ensureValidDays(loadRaw())||JSON.parse(JSON.stringify(DEFAULT_DAYS));save();
+document.getElementById('btnSaveKey').addEventListener('click', ()=> {
+  const v=document.getElementById('apiKeyInput').value.trim();
+  if(!v){ alert('請貼上 Google Maps API Key'); return; }
+  localStorage.setItem(KEY_KEY, v); location.reload();
+});
 
-/* ===== UI ===== */
-const panels=document.getElementById('panels');
-const toast=document.getElementById('toast');
-function showToast(m){toast.textContent=m;toast.style.display='block';setTimeout(()=>toast.style.display='none',2200);}
-function encodeQ(q){return encodeURIComponent(q||'');}
+let days = ensureDays(loadDays()); saveDays(days);
 
-function placeRow(stop){
-  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q)}`;
+/* =================== UI：渲染站點 =================== */
+const itinsEl=document.getElementById('itins');
+function card(stop, idx, dayId){
+  const mapLink=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.q)}`;
   return `
-  <div class="card">
-    <div class="row"><div class="time">${stop.time||''}</div><div class="place">${stop.title||''}</div></div>
-    ${stop.note?`<div class="note">${stop.note}</div>`:''}
-    <div class="actions">
-      <a class="action" target="_blank" rel="noopener" href="${mapUrl}">🗺️ 地點地圖</a>
-      <button class="action secondary" data-dest="${encodeQ(stop.q)}">➡️ 由此導航</button>
-    </div>
-  </div>`;
+    <div class="card">
+      <div class="row">
+        <div class="time">${stop.time||''}</div>
+        <div class="place">${stop.title||''}</div>
+      </div>
+      ${stop.note?`<div class="note">${stop.note}</div>`:''}
+      <div class="actions">
+        <a class="action" target="_blank" href="${mapLink}">🗺️ 地點地圖</a>
+        <button class="action secondary" data-nav="${encodeURIComponent(stop.q)}" data-day="${dayId}" data-idx="${idx}">▶️ 開始導航</button>
+        <button class="action" data-del="${dayId},${idx}">🗑️ 刪除此站</button>
+      </div>
+    </div>`;
 }
-
-function renderPanels(){
-  panels.innerHTML='';
+function renderList(){
+  itinsEl.innerHTML='';
   days.forEach(d=>{
     const chips=(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ');
-    const rows=(d.stops||[]).map(placeRow).join('');
+    const rows=(d.stops||[]).map((s,i)=>card(s,i,d.id)).join('');
     const sec=document.createElement('section');
-    sec.id=`panel-${d.id}`;sec.setAttribute('role','tabpanel');sec.hidden=d.id!==1;
+    sec.id=`panel-${d.id}`; sec.setAttribute('role','tabpanel'); sec.hidden=d.id!==1;
     sec.innerHTML=`
       <div class="card">
-        <div class="row"><div style="font-size:18px;font-weight:800">${d.label}</div><div>${chips}</div></div>
-        <div class="note">外開導航：iOS→Apple、Android→Google、其他→OSM；內嵌地圖僅作參考顯示。</div>
+        <div class="row"><div class="place">${d.label}</div><div>${chips}</div></div>
+        <div class="note">點「開始導航」後會持續定位並在地圖內更新；外開備援統一 Google 地圖。</div>
       </div>
-      <div class="grid">${rows}</div>
-      <div class="route-card">
-        <div style="font-weight:800;margin-bottom:8px">📍 一鍵串起今日路線（外開）</div>
+      ${rows}
+      <div class="card">
         <div class="actions">
-          <button class="action" data-day="${d.id}" data-mode="full">依序造訪各站</button>
-          <button class="action secondary" data-day="${d.id}" data-mode="dest">僅導航至最終點</button>
+          <button class="action" data-add="${d.id}">＋新增站點到 ${d.label}</button>
+          <button class="action secondary" data-goall="${d.id}">依序造訪：一鍵外開 Google 導航</button>
         </div>
-      </div>`;
-    panels.appendChild(sec);
+      </div>
+    `;
+    itinsEl.appendChild(sec);
   });
 }
-renderPanels();
+renderList();
 
-/* ===== 內嵌地圖（無 API）：Google-Embed 或 OSM-Embed ===== */
-const liveMap=document.getElementById('liveMap');
-const mapFrame=document.getElementById('mapFrame');
-function isSecureContext(){return location.protocol==='https:'||location.hostname==='localhost';}
-function embedGoogleByLatLng(lat,lng,zoom=15){
-  return `https://www.google.com/maps?q=${lat},${lng}&z=${zoom}&hl=zh-TW&output=embed`;
-}
-function embedOSMByLatLng(lat,lng,zoom=15){
-  const d=0.02*(15/zoom); // 粗略 bbox
-  const west=lng-d,east=lng+d,south=lat-d,north=lat+d;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${west},${south},${east},${north}&layer=mapnik&marker=${lat},${lng}`;
-}
-
-/* 定位與外開導航 */
-const FALLBACK_ORIGIN='Samala Hotel Bangkok';
-function getMode(){return document.getElementById('travelMode').value||'drive';}
-function detectPlatform(){
-  const ua=navigator.userAgent;
-  return {ios:/iPad|iPhone|iPod/.test(ua), android:/Android/.test(ua)};
-}
-function externalNavURL(originLL, destQ, waypoints, mode){
-  const saddr=`${originLL[0]},${originLL[1]}`;
-  const {ios,android}=detectPlatform();
-  if(ios){
-    const travel=mode==='walk'?'w':'d';
-    const wp=waypoints&&waypoints.length?`&q=${encodeURIComponent(waypoints.join(' to '))}`:'';
-    return `https://maps.apple.com/?saddr=${encodeURIComponent(saddr)}&daddr=${encodeURIComponent(destQ)}&dirflg=${travel}${wp}`;
-  }else if(android){
-    const tm=mode==='walk'?'walking':'driving';
-    const wp=waypoints&&waypoints.length?`&waypoints=${encodeURIComponent(waypoints.join('|'))}`:'';
-    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(saddr)}&destination=${encodeURIComponent(destQ)}${wp}&travelmode=${tm}`;
-  }else{
-    const tm=mode==='walk'?'foot':'car';
-    const points=[saddr].concat(waypoints||[],[destQ]);
-    return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_${tm}&route=${encodeURIComponent(points.join(';'))}`;
-  }
-}
-
-function getCurrentPosition(){
-  return new Promise((resolve,reject)=>{
-    if(!('geolocation' in navigator))return reject(new Error('NO_GEO'));
-    navigator.geolocation.getCurrentPosition(
-      pos=>resolve([pos.coords.latitude,pos.coords.longitude]),
-      err=>reject(err),
-      {enableHighAccuracy:true,timeout:12000,maximumAge:0}
-    );
-  });
-}
-
-async function resolveOriginLL(){
-  if(!isSecureContext()) return null; // 很多瀏覽器會擋 http 的 geolocation
-  try{
-    const ll=await getCurrentPosition();
-    localStorage.setItem('lastOrigin', ll.join(','));
-    return ll;
-  }catch(e){ return null; }
-}
-
-document.getElementById('btnLocate').addEventListener('click', async ()=>{
-  const provider=document.getElementById('embedProvider').value;
-  const last=localStorage.getItem('lastOrigin');
-  let ll = last? last.split(',').map(Number): null;
-  if(!ll) ll = await resolveOriginLL();
-  if(!ll){ showToast('無法取得定位，將顯示飯店位置'); ll=[13.737,100.553]; } // Samala 附近大致座標
-  const src = provider==='google' ? embedGoogleByLatLng(ll[0],ll[1],15) : embedOSMByLatLng(ll[0],ll[1],15);
-  mapFrame.src=src; liveMap.hidden=false;
-});
-
-document.getElementById('btnTodayRoute').addEventListener('click', async ()=>{
-  const current=document.querySelector('[role="tabpanel"]:not([hidden])');
-  if(!current)return;
-  const id=Number(current.id.split('-')[1]);
-  const d=days.find(x=>x.id===id); if(!d)return;
-  const mode=getMode();
-  const last=localStorage.getItem('lastOrigin');
-  let ll = last? last.split(',').map(Number): await resolveOriginLL();
-  if(!ll){ showToast('用飯店當起點'); ll=[13.737,100.553];}
-  const dest=d.stops[d.stops.length-1]?.q||'';
-  const wp=d.stops.slice(0,-1).map(s=>s.q);
-  const url=externalNavURL(ll, dest, wp, mode);
-  const w=window.open(url,'_blank'); if(!w)location.href=url;
-});
-
+// Tabs
 document.addEventListener('click',(e)=>{
   if(e.target.matches('.tab')){
     const id=Number(e.target.id.split('-')[1]);
@@ -263,53 +190,177 @@ document.addEventListener('click',(e)=>{
     e.target.setAttribute('aria-selected','true');
     window.scrollTo({top:0,behavior:'smooth'});
   }
-  if(e.target.matches('.action.secondary')&&e.target.dataset.dest){
-    const q=decodeURIComponent(e.target.dataset.dest);
-    const mode=getMode();
-    const last=localStorage.getItem('lastOrigin');
-    if(!last){ showToast('尚無定位，先按「顯示目前位置」會更準'); }
-    const ll = last? last.split(',').map(Number): [13.737,100.553];
-    const url=externalNavURL(ll, q, [], mode);
-    const w=window.open(url,'_blank'); if(!w)location.href=url;
+});
+
+/* =================== Google Maps（動態載入） =================== */
+const errorbar=document.getElementById('errorbar');
+function showError(m){ errorbar.textContent=m; errorbar.style.display='block'; }
+const toast=document.getElementById('toast');
+function showToast(m){ toast.textContent=m; toast.style.display='block'; setTimeout(()=>toast.style.display='none',1800); }
+
+let map, dirSvc, dirRenderer, geocoder, watchId=null, origin=null, destPlace='', mode='DRIVING', lastRouteTime=0, lastPos=null;
+const panelEl=document.getElementById('panel');
+const etaBox=document.getElementById('etaBox');
+
+function loadGoogle(cb){
+  const key=localStorage.getItem(KEY_KEY);
+  if(!key){ showError('請先在右上輸入 Google API Key，或用 ?gkey= 參數帶入。'); return; }
+  const exist=document.getElementById('gmaps');
+  if(exist){ cb && cb(); return; }
+  const s=document.createElement('script');
+  s.id='gmaps';
+  s.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=geometry`;
+  s.async=true; s.defer=true;
+  s.onerror=()=>showError('Google Maps 載入失敗，請檢查金鑰/網路或網域授權設定。');
+  s.onload=cb;
+  document.head.appendChild(s);
+}
+function initMap(){
+  try{
+    map=new google.maps.Map(document.getElementById('map'), {center:{lat:13.7563,lng:100.5018}, zoom:12, mapId:'bkk-itinerary'});
+    dirSvc=new google.maps.DirectionsService();
+    dirRenderer=new google.maps.DirectionsRenderer({map, panel:panelEl, suppressMarkers:false});
+    geocoder=new google.maps.Geocoder();
+  }catch(e){ showError('初始化地圖失敗：'+e.message); }
+}
+
+// haversine 公尺
+function hav(a,b){
+  const R=6371000, toRad=x=>x*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
+  const s1=Math.sin(dLat/2), s2=Math.sin(dLng/2);
+  const h=s1*s1 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*s2*s2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* ===== 導航 ===== */
+async function geocodeQ(q){
+  return new Promise((resolve,reject)=>{
+    geocoder.geocode({address:q, region:'th'}, (res, status)=>{
+      if(status==='OK' && res[0]) resolve(res[0].geometry.location);
+      else reject(new Error('找不到地點：'+status));
+    });
+  });
+}
+function routeNow(){
+  if(!origin || !destPlace) return;
+  const travelMode = google.maps.TravelMode[mode];
+  const req = {
+    origin,
+    destination: destPlace,
+    travelMode,
+    region: 'th'
+  };
+  if(mode==='TRANSIT'){
+    req.transitOptions = { departureTime: new Date() };
+  }else if(mode==='DRIVING'){
+    req.drivingOptions = { departureTime: new Date() }; // 讓系統考量即時路況
+  }
+  dirSvc.route(req,(res,status)=>{
+    if(status==='OK' && res.routes[0]){
+      dirRenderer.setDirections(res);
+      const leg=res.routes[0].legs[0];
+      etaBox.textContent = `👉 ${leg.start_address} ➜ ${leg.end_address}｜時間：${leg.duration.text}｜距離：${leg.distance.text}`;
+    }else{
+      etaBox.textContent='路線規劃失敗：'+status;
+    }
+  });
+}
+
+async function startNavigationTo(q){
+  destPlace = q;
+  try {
+    await geocodeQ(destPlace); // 先確定可解地名（Directions 也能處理，但先檢查）
+  } catch {
+    alert('找不到目的地，換個關鍵字試試');
+    return;
+  }
+  if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  if(!('geolocation' in navigator)){ showError('此裝置不支援定位'); return; }
+  const opts={ enableHighAccuracy:true, maximumAge:0, timeout:15000 };
+  watchId = navigator.geolocation.watchPosition(pos=>{
+    const {latitude, longitude} = pos.coords;
+    const here={lat:latitude, lng:longitude};
+    if(!origin){ origin=here; map.panTo(here); new google.maps.Marker({position:here,map,label:'我'}); }
+    // 移動超過 30m 或超過 10 秒就重算
+    const now=Date.now();
+    const moved = lastPos? (hav(lastPos, here) > 30) : true;
+    if(moved || now-lastRouteTime>10000){
+      origin=here; lastPos=here; lastRouteTime=now;
+      routeNow();
+    }
+  }, err=>{
+    console.warn(err);
+    showError('定位失敗或被拒絕；允許定位或改用外開 Google 地圖備援。');
+  }, opts);
+}
+
+function stopNavigation(){
+  if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  destPlace=''; origin=null; lastPos=null;
+  if(dirRenderer) dirRenderer.set('directions', null);
+  etaBox.textContent='尚未開始導航';
+  panelEl.innerHTML='';
+}
+
+/* ===== 事件綁定 ===== */
+document.getElementById('mode').addEventListener('change',(e)=>{ mode=e.target.value; routeNow(); });
+document.getElementById('btnRecenter').addEventListener('click',()=>{ if(origin) map.panTo(origin); });
+document.getElementById('btnStop').addEventListener('click', stopNavigation);
+
+// 新增 / 刪除 / 外開整日
+document.addEventListener('click',(e)=>{
+  if(e.target.dataset.add){
+    const dayId=Number(e.target.dataset.add);
+    const time=prompt('時間（例：14:00–16:00）')||'';
+    const title=prompt('標題')||'未命名';
+    const q=prompt('導航關鍵字')||'';
+    const note=prompt('備註（可留空）')||'';
+    const d=days.find(x=>x.id===dayId); if(!d) return;
+    d.stops.push({time,title,q,note}); saveDays(days); renderList(); showToast('已新增');
+  }
+  if(e.target.dataset.del){
+    const [dayId, idx]=e.target.dataset.del.split(',').map(Number);
+    const d=days.find(x=>x.id===dayId); if(!d||!d.stops[idx]) return;
+    d.stops.splice(idx,1); saveDays(days); renderList(); showToast('已刪除');
+  }
+  if(e.target.dataset.nav){
+    const q=decodeURIComponent(e.target.dataset.nav);
+    startNavigationTo(q);
+  }
+  if(e.target.dataset.goall){
+    const id=Number(e.target.dataset.goall);
+    const d=days.find(x=>x.id===id); if(!d) return;
+    const wp=d.stops.slice(0,-1).map(s=>s.q);
+    const dest=d.stops[d.stops.length-1]?.q||'';
+    const saddr = origin ? `${origin.lat},${origin.lng}` : ''; // 若還沒定位，讓 Google 自行判斷
+    const url=`https://www.google.com/maps/dir/?api=1${saddr?`&origin=${encodeURIComponent(saddr)}`:''}&destination=${encodeURIComponent(dest)}&waypoints=${encodeURIComponent(wp.join('|'))}&travelmode=${mode.toLowerCase()}`;
+    const w=window.open(url,'_blank'); if(!w) location.href=url;
   }
 });
 
-/* ===== 新增/刪除/分享 ===== */
-document.getElementById('btnAdd').addEventListener('click',()=>{
-  const dayId=Number(prompt('新增到第幾天（1-4）？')); if(!dayId)return;
-  const time=prompt('時間（如 14:00–16:00 或 下午）')||'';
-  const title=prompt('標題（顯示用）')||'未命名';
-  const q=prompt('導航關鍵字（可用地名或經緯度）')||'';
-  const note=prompt('備註（可留空）')||'';
-  const d=days.find(x=>x.id===dayId); if(!d)return alert('找不到指定天數');
-  d.stops.push({time,title,q,note}); save(); renderPanels(); showToast('已新增站點');
-});
-document.getElementById('btnDel').addEventListener('click',()=>{
-  const dayId=Number(prompt('要刪除哪一天（1-4）？')); const idx=Number(prompt('刪除該日第幾個站點（從 1 起算）？'));
-  if(!dayId||!idx)return;
-  const d=days.find(x=>x.id===dayId); if(!d||!d.stops[idx-1])return alert('找不到站點');
-  d.stops.splice(idx-1,1); save(); renderPanels(); showToast('已刪除站點');
-});
-function makeShareLink(){
-  const json=JSON.stringify(days); const b64=btoa(unescape(encodeURIComponent(json)));
-  const urlQ=`${location.origin}${location.pathname}?reset=1&v=${Date.now()}&data=${b64}`;
-  return urlQ.length<1800 ? urlQ : `${location.origin}${location.pathname}#d=${b64}`;
-}
+// 分享整份行程（URL 內嵌）
 document.getElementById('btnShare').addEventListener('click',async()=>{
-  const url=makeShareLink();
-  try{ if(navigator.share){ await navigator.share({title:'行程連結',url}); }
-       else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
-       else { prompt('複製這個連結分享：',url); }
+  const b64=btoa(unescape(encodeURIComponent(JSON.stringify(days))));
+  const url=`${location.origin}${location.pathname}?data=${b64}`;
+  try{
+    if(navigator.share){ await navigator.share({title:'我的曼谷行程',url}); }
+    else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
+    else{ prompt('複製這個連結分享：',url); }
   }catch{ prompt('複製這個連結分享：',url); }
 });
 
-/* ===== PWA（可選：部分瀏覽器會顯示加入主畫面） ===== */
-let deferredPrompt=null;
-window.addEventListener('beforeinstallprompt', (e)=>{e.preventDefault();deferredPrompt=e;});
-document.getElementById('btnInstall').addEventListener('click',async()=>{
-  if(!deferredPrompt) return alert('此瀏覽器暫不支援安裝提示，可用瀏覽器「加入主畫面」。');
-  deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null;
-});
+// 匯入分享連結
+(function importFromURL(){
+  const qs=new URLSearchParams(location.search); const d=qs.get('data');
+  if(!d) return;
+  try{ const json=decodeURIComponent(escape(atob(d))); const obj=JSON.parse(json);
+    if(Array.isArray(obj)&&obj.length){ days=obj; saveDays(days); history.replaceState(null,'',location.pathname); }
+  }catch{}
+})();
+
+/* ===== 啟動：載入 Google 並初始化 ===== */
+loadGoogle(()=>{ initMap(); });
 </script>
 </body>
 </html>
