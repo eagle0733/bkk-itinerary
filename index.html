@@ -4,18 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#0f172a"/>
-  <title>曼谷行程 PWA（Leaflet | 無金鑰/無 Google API）</title>
+  <title>曼谷行程 PWA（Leaflet 版｜無金鑰）</title>
+
+  <!-- PWA（可留著，GitHub Pages/Netlify 自動可安裝） -->
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon-192.png" sizes="192x192">
   <link rel="apple-touch-icon" href="./icon-512.png">
+
   <!-- Leaflet（無需 API Key） -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-VuZ8H8bN6Z9erjRzCQXDpUe1koXSPoZ1G7G8KPVWJJ8=" crossorigin=""></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-VuZ8H8bN6Z9erjRzCQXDpUe1koXSPoZ1G7G8KPVWJJ8=" crossorigin=""></script>
+
   <style>
     :root{ --bg:#0f172a; --card:#111827; --muted:#94a3b8; --text:#e5e7eb; --chip:#1f2937; --btn:#16a34a; }
     *{box-sizing:border-box}
     html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans TC",sans-serif}
-    .container{max-width:960px;margin:0 auto;padding:16px 16px 88px}
+    .container{max-width:1100px;margin:0 auto;padding:16px 16px 96px}
     header{position:sticky;top:0;z-index:50;background:linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.75));backdrop-filter:blur(8px);border-bottom:1px solid rgba(148,163,184,.15)}
     .head-inner{display:flex;gap:12px;align-items:center;padding:12px 16px}
     .title{font-size:18px;font-weight:700}
@@ -39,9 +43,10 @@
     .route-card{background:#0b1220;border-radius:16px;border:1px dashed rgba(148,163,184,.25);padding:12px;margin-top:14px}
     .pill{display:inline-flex;align-items:center;gap:6px;background:#0b1220;border:1px solid rgba(255,255,255,.1);padding:6px 10px;border-radius:999px;font-size:12px;color:var(--muted)}
     .grid{display:grid;gap:10px}
-    @media (min-width:720px){ .grid{grid-template-columns:1fr 1fr} }
-    #map{height:56vh;border-radius:12px;border:1px solid rgba(255,255,255,.12);margin-top:10px}
+    @media (min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+    #map{height:56vh;border-radius:12px;border:1px solid rgba(255,255,255,.12);margin-top:12px}
     .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:70px;background:#0b1220;color:#e5e7eb;border:1px solid rgba(255,255,255,.12);padding:10px 14px;border-radius:12px;font-size:12px;display:none;z-index:120}
+    .errorbar{position:fixed;top:56px;left:0;right:0;background:#7f1d1d;color:#fff;padding:10px 14px;font-size:12px;display:none;z-index:60;text-align:center}
   </style>
 </head>
 <body>
@@ -49,7 +54,7 @@
     <div class="head-inner">
       <div>
         <div class="title">曼谷行程 PWA（Leaflet 版｜無金鑰）</div>
-        <div class="sub">使用 OpenStreetMap 圖磚與瀏覽器定位；內建簡易直線導航＋外開 Apple/Google/OSM 路線</div>
+        <div class="sub">使用 OpenStreetMap 圖磚與瀏覽器定位；內建直線導引＋外開 Apple/Google/OSM 路線</div>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px">
         <button class="btn ghost" id="btnInstall" title="安裝為 App">📲 安裝</button>
@@ -68,322 +73,252 @@
       </select>
       <button class="btn" id="btnTodayRoute">🗺️ 從我這裡串起今日路線</button>
       <button class="btn ghost" id="btnRecenter">🎯 回到我的位置</button>
-      <button class="btn ghost" id="btnFollow">🔔 開啟直線導航</button>
+      <button class="btn ghost" id="btnFollow">🔔 開啟直線導引</button>
     </div>
   </header>
 
   <main class="container">
     <div id="panels"></div>
-    <div id="map"></div>
+    <div id="map" aria-label="地圖"></div>
   </main>
 
   <div class="toast" id="toast"></div>
+  <div class="errorbar" id="errorbar"></div>
 
   <script>
-  // ====== 行程資料（同前版，過濾純交通段） ======
-  const DEFAULT_DAYS = [
-    {
-      id: 1, label: 'Day 1｜9/26 (五)', chips: ['Asok｜Erawan', 'Chula', '按摩'],
-      stops: [
-        { time: '13:00–14:00', title: 'Terminal 21 購物', q: 'Terminal 21 Asok', note: '' },
-        { time: '14:30–15:00', title: '四面佛 參拜', q: 'Erawan Shrine Bangkok', note: '可短暫參觀' },
-        { time: '15:00–16:30', title: '朱拉隆功大學 校園巡禮', q: 'Chulalongkorn University', note: '校園走走' },
-        { time: '16:30–18:00', title: 'Chula 商圈（班通路 / Jay Oh）', q: 'Banthat Thong Road Bangkok', note: '可吃 Jay Oh Chula' },
-        { time: '18:00–19:30', title: 'Big C／暹羅廣場 逛街', q: 'Big C Ratchadamri or Siam Square', note: '' },
-        { time: '20:00–21:30', title: 'Massage@Le 按摩', q: 'Massage@Le Bangkok', note: '放鬆' }
-      ]
-    },
-    { id: 2, label: 'Day 2｜9/27 (六)', chips: ['舊城寺廟群', '河畔', 'ICONSIAM'], stops: [
-      { time: '09:30–12:00', title: '大皇宮／玉佛寺／臥佛寺／瑪哈泰寺 巡禮', q: 'Grand Palace Bangkok', note: '同區步行可達' },
-      { time: '12:00–13:00', title: 'Tha Maharaj 用餐休息', q: 'Tha Maharaj', note: '' },
-      { time: '13:30–15:00', title: '考山路 閒晃（特色星巴克）', q: 'Khaosan Road', note: '' },
-      { time: '16:00–17:00', title: '鄭王廟（王朗市場）', q: 'Wat Arun Ratchawararam', note: '可順逛 Wang Lang Market' },
-      { time: '18:00–19:30', title: 'ICONSIAM 逛街', q: 'ICONSIAM', note: '' },
-      { time: '19:45–21:45', title: '白蘭花號 晚餐遊船', q: 'White Orchid River Cruise Bangkok', note: '' }
-    ]},
-    { id: 3, label: 'Day 3｜9/28 (日)', chips: ['郊區包車', '市集', 'Spa'], stops: [
-      { time: '07:00–13:30', title: '丹嫩沙朵／美功鐵道／樹中廟（包車）', q: 'Damnoen Saduak Floating Market', note: '含 Maeklong Railway Market、Wat Bang Kung' },
-      { time: '15:00–17:00', title: '洽圖洽市集（JJ Mall）', q: 'Chatuchak Weekend Market', note: '' },
-      { time: '17:00–18:20', title: '喬德夜市（火山排骨）', q: 'Jodd Fairs Rama 9 Bangkok', note: '' },
-      { time: '19:00–21:00', title: 'Oasis 水療按摩', q: 'Oasis Spa Bangkok', note: '就近分店' }
-    ]},
-    { id: 4, label: 'Day 4｜9/29 (一)', chips: ['Buffet', 'Siam 區'], stops: [
-      { time: '10:00–12:00', title: '暹羅百麗宮 Buffet（WISDOM）', q: 'Siam Paragon', note: 'WISDOM International Buffet' },
-      { time: '12:00–14:00', title: 'Big C／暹羅廣場 逛街', q: 'Big C Ratchadamri or Siam Square', note: '' }
-    ]}
-  ];
+  document.addEventListener('DOMContentLoaded', () => {
+    /* ---------- 基本資料 ---------- */
+    const DEFAULT_DAYS = [
+      { id:1,label:'Day 1｜9/26 (五)',chips:['Asok｜Erawan','Chula','按摩'],stops:[
+        {time:'13:00–14:00',title:'Terminal 21 購物',q:'Terminal 21 Asok',note:''},
+        {time:'14:30–15:00',title:'四面佛 參拜',q:'Erawan Shrine Bangkok',note:'可短暫參觀'},
+        {time:'15:00–16:30',title:'朱拉隆功大學 校園巡禮',q:'Chulalongkorn University',note:'校園走走'},
+        {time:'16:30–18:00',title:'Chula 商圈（班通路 / Jay Oh）',q:'Banthat Thong Road Bangkok',note:'可吃 Jay Oh Chula'},
+        {time:'18:00–19:30',title:'Big C／暹羅廣場 逛街',q:'Big C Ratchadamri or Siam Square',note:''},
+        {time:'20:00–21:30',title:'Massage@Le 按摩',q:'Massage@Le Bangkok',note:'放鬆'}
+      ]},
+      { id:2,label:'Day 2｜9/27 (六)',chips:['舊城寺廟群','河畔','ICONSIAM'],stops:[
+        {time:'09:30–12:00',title:'大皇宮／玉佛寺／臥佛寺／瑪哈泰寺 巡禮',q:'Grand Palace Bangkok',note:'同區步行可達'},
+        {time:'12:00–13:00',title:'Tha Maharaj 用餐休息',q:'Tha Maharaj',note:''},
+        {time:'13:30–15:00',title:'考山路 閒晃（特色星巴克）',q:'Khaosan Road',note:''},
+        {time:'16:00–17:00',title:'鄭王廟（王朗市場）',q:'Wat Arun Ratchawararam',note:'可順逛 Wang Lang Market'},
+        {time:'18:00–19:30',title:'ICONSIAM 逛街',q:'ICONSIAM',note:''},
+        {time:'19:45–21:45',title:'白蘭花號 晚餐遊船',q:'White Orchid River Cruise Bangkok',note:''}
+      ]},
+      { id:3,label:'Day 3｜9/28 (日)',chips:['郊區包車','市集','Spa'],stops:[
+        {time:'07:00–13:30',title:'丹嫩沙朵／美功鐵道／樹中廟（包車）',q:'Damnoen Saduak Floating Market',note:'含 Maeklong Railway Market、Wat Bang Kung'},
+        {time:'15:00–17:00',title:'洽圖洽市集（JJ Mall）',q:'Chatuchak Weekend Market',note:''},
+        {time:'17:00–18:20',title:'喬德夜市（火山排骨）',q:'Jodd Fairs Rama 9 Bangkok',note:''},
+        {time:'19:00–21:00',title:'Oasis 水療按摩',q:'Oasis Spa Bangkok',note:'就近分店'}
+      ]},
+      { id:4,label:'Day 4｜9/29 (一)',chips:['Buffet','Siam 區'],stops:[
+        {time:'10:00–12:00',title:'暹羅百麗宮 Buffet（WISDOM）',q:'Siam Paragon',note:'WISDOM International Buffet'},
+        {time:'12:00–14:00',title:'Big C／暹羅廣場 逛街',q:'Big C Ratchadamri or Siam Square',note:''}
+      ]}
+    ];
+    const LS_KEY='itinerary_leaflet_pwa_v1';
+    function ensureValidDays(d){ if(!Array.isArray(d)||!d.length) return null; for(const x of d){ if(!x||!('id'in x)||!Array.isArray(x.stops)) return null; } return d; }
+    function loadRaw(){ try{const r=localStorage.getItem(LS_KEY); return r?JSON.parse(r):null;}catch{return null} }
+    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(days)); }
+    (function(){ const sp=new URLSearchParams(location.search); if(sp.get('reset')==='1') localStorage.removeItem(LS_KEY); })();
+    // 分享連結還原
+    (function tryImportFromURL(){
+      const once=()=>{
+        const qs=new URLSearchParams(location.search);
+        let e=qs.get('data'); if(!e&&location.hash.startsWith('#d=')) e=location.hash.slice(3);
+        if(!e) return false;
+        try{ const json=decodeURIComponent(escape(atob(e))); const data=JSON.parse(json);
+          if(Array.isArray(data)&&data.length){ localStorage.setItem(LS_KEY, JSON.stringify(data)); history.replaceState(null,'',location.pathname); return true; }
+        }catch{}
+        return false;
+      };
+      if(once()) location.reload();
+    })();
+    let days = ensureValidDays(loadRaw()) || JSON.parse(JSON.stringify(DEFAULT_DAYS)); save();
 
-  // ====== PWA 永久保存與分享 ======
-  const LS_KEY='itinerary_leaflet_pwa_v1';
-  (function(){ const sp=new URLSearchParams(location.search); if(sp.get('reset')==='1') localStorage.removeItem(LS_KEY); })();
-  function ensureValidDays(d){ if(!Array.isArray(d)||!d.length) return null; for(const x of d){ if(!x||!('id'in x)||!Array.isArray(x.stops)) return null; } return d; }
-  function loadRaw(){ try{const r=localStorage.getItem(LS_KEY); return r?JSON.parse(r):null;}catch{return null} }
-  function save(){ localStorage.setItem(LS_KEY, JSON.stringify(days)); }
-  function tryImportFromURL(){
-    const parseOnce=()=>{
-      const qs=new URLSearchParams(location.search);
-      let e=qs.get('data'); if(!e&&location.hash.startsWith('#d=')) e=location.hash.slice(3);
-      if(!e) return false;
-      try{ const json=decodeURIComponent(escape(atob(e))); const data=JSON.parse(json);
-        if(Array.isArray(data)&&data.length){ localStorage.setItem(LS_KEY, JSON.stringify(data)); history.replaceState(null,'',location.pathname); window.__importedFromURL=true; return true; }
-      }catch{}
-      return false;
-    };
-    if(parseOnce()) return; window.addEventListener('pageshow',()=>{ if(parseOnce()) location.reload(); });
-  }
-  tryImportFromURL();
-  let days = ensureValidDays(loadRaw()) || JSON.parse(JSON.stringify(DEFAULT_DAYS)); save();
-
-  // ====== Leaflet 地圖與定位（無 API） ======
-  let map = L.map('map', { zoomControl: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
-  }).addTo(map);
-  map.setView([13.7563, 100.5018], 12);
-
-  let meMarker=null, accCircle=null, legLine=null, routeLine=null, followOn=false;
-  const toast=document.getElementById('toast');
-  function showToast(t){ toast.textContent=t; toast.style.display='block'; setTimeout(()=>toast.style.display='none', 2200); }
-
-  function startWatch(){
-    if(!('geolocation' in navigator)){ showToast('裝置不支援定位'); return; }
-    const opts={ enableHighAccuracy:true, maximumAge:0, timeout:15000 };
-    navigator.geolocation.watchPosition(handleFix, err=>console.warn(err), opts);
-  }
-  function handleFix(pos){
-    const { latitude, longitude, accuracy } = pos.coords;
-    const ll=[latitude, longitude];
-    localStorage.setItem('lastOrigin', ll.join(','));
-
-    if(!meMarker){
-      meMarker=L.marker(ll).addTo(map).bindTooltip('我的位置',{permanent:false});
-      accCircle=L.circle(ll,{radius:Math.max(accuracy,15),color:'#22c55e',fillColor:'#22c55e',fillOpacity:0.08,weight:1}).addTo(map);
-      map.panTo(ll);
-    }else{
-      meMarker.setLatLng(ll);
-      accCircle.setLatLng(ll); accCircle.setRadius(Math.max(accuracy,15));
-    }
-
-    if(followOn && currentTarget){
-      updateLeg(ll, currentTarget);
-    }
-  }
-
-  // ====== 直線導航（無路徑 API） ======
-  let currentTarget=null; // [lat,lng]
-  function updateLeg(fromLL, toLL){
-    const line=[fromLL, toLL];
-    if(legLine) legLine.setLatLngs(line);
-    else legLine=L.polyline(line, {color:'#22c55e'}).addTo(map);
-
-    const d=hav(fromLL, toLL); // meters
-    const b=bearing(fromLL, toLL);
-    showToast(`距離 ${ (d/1000).toFixed(2) } km｜方位 ${b.toFixed(0)}°`);
-  }
-  function hav(a,b){ const R=6371000; const toRad=x=>x*Math.PI/180; const dLat=toRad(b[0]-a[0]), dLng=toRad(b[1]-a[1]); const lat1=toRad(a[0]), lat2=toRad(b[0]); const h=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
-  function bearing(a,b){ const toRad=x=>x*Math.PI/180, toDeg=x=>x*180/Math.PI; const lat1=toRad(a[0]), lat2=toRad(b[0]); const dLon=toRad(b[1]-a[1]); const y=Math.sin(dLon)*Math.cos(lat2); const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon); let brng=toDeg(Math.atan2(y,x)); return (brng+360)%360; }
-
-  // ====== UI：渲染面板 ======
-  const panels=document.getElementById('panels');
-  function encodeQ(q){ return encodeURIComponent(q||''); }
-  function placeRow(stop){
-    const osmUrl = `https://www.openstreetmap.org/search?query=${encodeQ(stop.q)}`;
-    return `<div class="card">
-      <div class="row"><div class="time">${stop.time||''}</div><div class="place">${stop.title||''}</div></div>
-      ${stop.note?`<div class="note">${stop.note}</div>`:''}
-      <div class="actions">
-        <a class="action" target="_blank" rel="noopener" href="${osmUrl}">🗺️ OSM 地點</a>
-        <button class="action secondary" data-dest="${encodeQ(stop.q)}">➡️ 外開路線</button>
-        <button class="action" data-dest-inline="${encodeQ(stop.q)}">🧭 直線導航（內嵌）</button>
-      </div>
-    </div>`;
-  }
-  function renderPanels(){
-    panels.innerHTML='';
-    days.forEach(d=>{
-      const chips=(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ');
-      const rows=(d.stops||[]).map(placeRow).join('');
-      const sec=document.createElement('section');
-      sec.id=`panel-${d.id}`; sec.setAttribute('role','tabpanel'); sec.hidden=d.id!==1;
-      sec.innerHTML=`
-        <div class="card">
-          <div class="row"><div style="font-size:18px;font-weight:800">${d.label}</div><div>${chips}</div></div>
-          <div class="note">內嵌為「直線導引」（無 API），若需精準轉彎指示請使用外開的 Apple/Google/OSM 方案。</div>
+    /* ---------- UI：行程列表 ---------- */
+    const panels=document.getElementById('panels');
+    function encodeQ(q){ return encodeURIComponent(q||''); }
+    function placeRow(stop){
+      const osmUrl = `https://www.openstreetmap.org/search?query=${encodeQ(stop.q)}`;
+      return `<div class="card">
+        <div class="row"><div class="time">${stop.time||''}</div><div class="place">${stop.title||''}</div></div>
+        ${stop.note?`<div class="note">${stop.note}</div>`:''}
+        <div class="actions">
+          <a class="action" target="_blank" rel="noopener" href="${osmUrl}">🗺️ OSM 地點</a>
+          <button class="action secondary" data-dest="${encodeQ(stop.q)}">➡️ 外開路線</button>
+          <button class="action" data-dest-inline="${encodeQ(stop.q)}">🧭 直線導引（需經緯度）</button>
         </div>
-        <div class="grid">${rows}</div>
-        <div class="route-card">
-          <div style="font-weight:800;margin-bottom:8px">📍 一鍵串起今日路線（外開）</div>
-          <div class="actions">
-            <button class="action" data-day="${d.id}" data-mode="full">依序造訪各站</button>
-            <button class="action secondary" data-day="${d.id}" data-mode="dest">僅導航至最終點</button>
+      </div>`;
+    }
+    function renderPanels(){
+      panels.innerHTML='';
+      days.forEach(d=>{
+        const chips=(d.chips||[]).map(c=>`<span class="pill">${c}</span>`).join(' ');
+        const rows=(d.stops||[]).map(placeRow).join('');
+        const sec=document.createElement('section');
+        sec.id=`panel-${d.id}`; sec.setAttribute('role','tabpanel'); sec.hidden=d.id!==1;
+        sec.innerHTML=`
+          <div class="card">
+            <div class="row"><div style="font-size:18px;font-weight:800">${d.label}</div><div>${chips}</div></div>
+            <div class="note">內嵌為「直線導引」（無 API）；需要轉彎指示請用外開 Apple/Google/OSM。</div>
           </div>
-        </div>`;
-      panels.appendChild(sec);
+          <div class="grid">${rows}</div>
+          <div class="route-card">
+            <div style="font-weight:800;margin-bottom:8px">📍 一鍵串起今日路線（外開）</div>
+            <div class="actions">
+              <button class="action" data-day="${d.id}" data-mode="full">依序造訪各站</button>
+              <button class="action secondary" data-day="${d.id}" data-mode="dest">僅導航至最終點</button>
+            </div>
+          </div>`;
+        panels.appendChild(sec);
+      });
+    }
+    renderPanels();
+
+    // Tab 切換
+    document.addEventListener('click',(e)=>{
+      if(e.target.matches('.tab')){
+        const id=Number(e.target.id.split('-')[1]);
+        document.querySelectorAll('[role="tabpanel"]').forEach(p=>p.hidden=true);
+        document.getElementById(`panel-${id}`).hidden=false;
+        document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected','false'));
+        e.target.setAttribute('aria-selected','true');
+        window.scrollTo({top:0,behavior:'smooth'});
+      }
     });
-  }
 
-  // ====== 外開路線（Apple / Google / OSM） ======
-  function externalNavURL(originLL, destQ, waypoints, mode){
-    const saddr = `${originLL[0]},${originLL[1]}`;
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isAndroid = /Android/.test(navigator.userAgent);
-    const travel = mode==='walk' ? 'w' : 'd'; // Apple dirflg
+    /* ---------- 錯誤提示 ---------- */
+    const errorbar=document.getElementById('errorbar');
+    function showError(msg){ errorbar.textContent=msg; errorbar.style.display='block'; }
+    const toast=document.getElementById('toast');
+    function showToast(t){ toast.textContent=t; toast.style.display='block'; setTimeout(()=>toast.style.display='none',2200); }
 
-    if(isIOS){
-      // Apple Maps
-      const d = encodeURIComponent(destQ);
-      const wp = waypoints && waypoints.length ? `&q=${encodeURIComponent(waypoints.join(' to '))}` : '';
-      return `https://maps.apple.com/?saddr=${encodeURIComponent(saddr)}&daddr=${d}&dirflg=${travel}${wp}`;
-    }else if(isAndroid){
-      // Google Maps App (無金鑰)
-      const d = encodeURIComponent(destQ);
-      const wp = waypoints && waypoints.length ? `&waypoints=${encodeURIComponent(waypoints.join('|'))}` : '';
-      const tm = mode==='walk' ? 'walking' : 'driving';
-      return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(saddr)}&destination=${d}${wp}&travelmode=${tm}`;
-    }else{
-      // OSM 網頁（FOSSGIS OSRM）
-      const tm = mode==='walk' ? 'foot' : 'car';
-      const points = [saddr].concat(waypoints||[], [destQ]);
-      return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_${tm}&route=${encodeURIComponent(points.join(';'))}`;
+    /* ---------- Leaflet Map 初始化（保證在 DOM 與 Leaflet 就緒後） ---------- */
+    function ensureLeaflet(){
+      if(!window.L){ showError('Leaflet 載入失敗，請檢查網路或 CDN 是否被阻擋。'); return null; }
+      try{
+        const map = L.map('map', { zoomControl:true });
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+        // 備援圖磚（主圖磚失敗時可切換）
+        const hot = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OSM & HOT'});
+        map.setView([13.7563, 100.5018], 12);
+        return { map, layers:{osm,hot} };
+      }catch(e){
+        showError('建立地圖失敗：'+ e.message);
+        return null;
+      }
     }
-  }
+    const env = ensureLeaflet();
+    if(!env) return;
+    const { map } = env;
 
-  // ====== Geocoding by Nominatim (為避免 API，僅用到 OSM 搜尋頁開啟；內嵌直線導引提供座標輸入提示) ======
-  // 提供簡單地名→座標解析（使用瀏覽器內建 geolocation + 使用者可能輸入經緯度），避免必然依賴遠端 geocoding API。
-  function parseLatLng(q){
-    const m = q && q.match?.(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
-    if(m) return [parseFloat(m[1]), parseFloat(m[2])];
-    return null;
-  }
+    /* ---------- 即時定位 & 直線導引 ---------- */
+    let meMarker=null, accCircle=null, legLine=null, followOn=false, currentTarget=null;
+    function startWatch(){
+      if(!('geolocation' in navigator)){ showError('裝置不支援定位'); return; }
+      const opts={ enableHighAccuracy:true, maximumAge:0, timeout:15000 };
+      navigator.geolocation.watchPosition(handleFix, err=>{
+        console.warn(err); showToast('定位暫時失敗，持續嘗試中…');
+      }, opts);
+    }
+    function handleFix(pos){
+      const { latitude, longitude, accuracy } = pos.coords;
+      const ll=[latitude, longitude];
+      localStorage.setItem('lastOrigin', ll.join(','));
+      if(!meMarker){
+        meMarker=L.marker(ll).addTo(map).bindTooltip('我的位置',{permanent:false});
+        accCircle=L.circle(ll,{radius:Math.max(accuracy,15),color:'#22c55e',fillColor:'#22c55e',fillOpacity:0.08,weight:1}).addTo(map);
+        map.panTo(ll);
+      }else{
+        meMarker.setLatLng(ll); accCircle.setLatLng(ll); accCircle.setRadius(Math.max(accuracy,15));
+      }
+      if(followOn && currentTarget){ updateLeg(ll, currentTarget); }
+    }
+    function hav(a,b){ const R=6371000; const toRad=x=>x*Math.PI/180; const dLat=toRad(b[0]-a[0]), dLng=toRad(b[1]-a[1]); const lat1=toRad(a[0]), lat2=toRad(b[0]); const h=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
+    function bearing(a,b){ const toRad=x=>x*Math.PI/180, toDeg=x=>x*180/Math.PI; const lat1=toRad(a[0]), lat2=toRad(b[0]); const dLon=toRad(b[1]-a[1]); const y=Math.sin(dLon)*Math.cos(lat2); const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon); return (toDeg(Math.atan2(y,x))+360)%360; }
+    function updateLeg(fromLL,toLL){
+      const line=[fromLL,toLL];
+      if(legLine) legLine.setLatLngs(line);
+      else legLine=L.polyline(line,{color:'#22c55e'}).addTo(map);
+      const d=hav(fromLL,toLL); const b=bearing(fromLL,toLL);
+      showToast(`距離 ${(d/1000).toFixed(2)} km｜方位 ${b.toFixed(0)}°`);
+    }
+    function parseLatLng(q){ const m=q && q.match?.(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/); return m?[parseFloat(m[1]),parseFloat(m[2])]:null; }
 
-  // ====== 事件綁定 ======
-  document.addEventListener('click',(e)=>{
-    if(e.target.matches('.tab')){
-      const id=Number(e.target.id.split('-')[1]);
-      document.querySelectorAll('[role="tabpanel"]').forEach(p=>p.hidden=true);
-      document.getElementById(`panel-${id}`).hidden=false;
-      document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected','false'));
-      e.target.setAttribute('aria-selected','true');
+    startWatch();
+
+    /* ---------- 外開路線 ---------- */
+    function externalNavURL(originLL, destQ, waypoints, mode){
+      const saddr = `${originLL[0]},${originLL[1]}`;
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isAndroid = /Android/.test(navigator.userAgent);
+      const travel = mode==='walk' ? 'w' : 'd';
+      if(isIOS){
+        const d = encodeURIComponent(destQ);
+        const wp = waypoints && waypoints.length ? `&q=${encodeURIComponent(waypoints.join(' to '))}` : '';
+        return `https://maps.apple.com/?saddr=${encodeURIComponent(saddr)}&daddr=${d}&dirflg=${travel}${wp}`;
+      }else if(isAndroid){
+        const d = encodeURIComponent(destQ);
+        const wp = waypoints && waypoints.length ? `&waypoints=${encodeURIComponent(waypoints.join('|'))}` : '';
+        const tm = mode==='walk' ? 'walking' : 'driving';
+        return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(saddr)}&destination=${d}${wp}&travelmode=${tm}`;
+      }else{
+        const tm = mode==='walk' ? 'foot' : 'car';
+        const points = [saddr].concat(waypoints||[], [destQ]);
+        return `https://www.openstreetmap.org/directions?engine=fossgis_osrm_${tm}&route=${encodeURIComponent(points.join(';'))}`;
+      }
     }
-    if(e.target.matches('[data-dest-inline]')){
-      // 直線導引
-      const q=decodeURIComponent(e.target.dataset.destInline);
-      const coord = parseLatLng(q);
-      if(!coord){ alert('直線導引僅支援輸入經緯度（例如 13.7367,100.5231）。外開路線則可用地名。'); return; }
-      currentTarget = coord;
-      followOn = true;
-      document.getElementById('btnFollow').textContent='🛑 停止直線導航';
-      if(meMarker) updateLeg(meMarker.getLatLng(), coord);
-      map.flyTo(coord, 15);
-    }
-    if(e.target.matches('.action') && e.target.dataset.day){
-      // 一鍵外開（串全部）
-      const id=Number(e.target.dataset.day);
-      const d=days.find(x=>x.id===id); if(!d) return;
+
+    /* ---------- 事件：導航/直線導引/今日路線 ---------- */
+    document.addEventListener('click',(e)=>{
+      if(e.target.matches('[data-dest-inline]')){
+        const q=decodeURIComponent(e.target.dataset.destInline);
+        const coord=parseLatLng(q);
+        if(!coord){ alert('直線導引僅支援輸入經緯度（例如 13.7367,100.5231）。外開路線可用地名。'); return; }
+        currentTarget=coord; followOn=true;
+        document.getElementById('btnFollow').textContent='🛑 停止直線導引';
+        const origin=meMarker?meMarker.getLatLng():map.getCenter();
+        updateLeg([origin.lat,origin.lng], coord); map.flyTo(coord, 15);
+      }
+      if(e.target.matches('.action') && e.target.dataset.day){
+        const id=Number(e.target.dataset.day); const d=days.find(x=>x.id===id); if(!d) return;
+        const mode=document.getElementById('travelMode').value;
+        const origin=(meMarker?meMarker.getLatLng():map.getCenter());
+        const dest=d.stops[d.stops.length-1]?.q||''; const wp=d.stops.slice(0,-1).map(s=>s.q);
+        window.open(externalNavURL([origin.lat,origin.lng], dest, wp, mode), '_blank');
+      }
+      if(e.target.matches('.action.secondary') && e.target.dataset.dest){
+        const q=decodeURIComponent(e.target.dataset.dest);
+        const mode=document.getElementById('travelMode').value;
+        const origin=(meMarker?meMarker.getLatLng():map.getCenter());
+        window.open(externalNavURL([origin.lat,origin.lng], q, [], mode), '_blank');
+      }
+    });
+
+    document.getElementById('btnTodayRoute').addEventListener('click',()=>{
+      const current=document.querySelector('[role="tabpanel"]:not([hidden])');
+      if(!current) return;
+      const id=Number(current.id.split('-')[1]); const d=days.find(x=>x.id===id); if(!d) return;
       const mode=document.getElementById('travelMode').value;
       const origin=(meMarker?meMarker.getLatLng():map.getCenter());
-      const originLL=[origin.lat, origin.lng];
-      const dest=d.stops[d.stops.length-1]?.q||'';
-      const waypoints=d.stops.slice(0,-1).map(s=>s.q);
-      const url=externalNavURL(originLL, dest, waypoints, mode);
-      window.open(url, '_blank');
-    }
-    if(e.target.matches('.action.secondary') && e.target.dataset.dest){
-      // 外開單站
-      const q=decodeURIComponent(e.target.dataset.dest);
-      const mode=document.getElementById('travelMode').value;
-      const origin=(meMarker?meMarker.getLatLng():map.getCenter());
-      const originLL=[origin.lat, origin.lng];
-      window.open(externalNavURL(originLL, q, [], mode), '_blank');
-    }
-  });
-
-  // 跟隨／停止
-  document.getElementById('btnFollow').addEventListener('click',()=>{
-    followOn = !followOn;
-    document.getElementById('btnFollow').textContent = followOn ? '🛑 停止直線導航' : '🔔 開啟直線導航';
-    if(!followOn){ currentTarget=null; if(legLine){ map.removeLayer(legLine); legLine=null; } }
-  });
-  document.getElementById('btnRecenter').addEventListener('click',()=>{ if(meMarker) map.panTo(meMarker.getLatLng()); });
-  document.getElementById('btnTodayRoute').addEventListener('click',()=>{
-    const current=document.querySelector('[role="tabpanel"]:not([hidden])');
-    if(!current) return;
-    const id=Number(current.id.split('-')[1]);
-    const d=days.find(x=>x.id===id);
-    if(!d) return;
-    const mode=document.getElementById('travelMode').value;
-    const origin=(meMarker?meMarker.getLatLng():map.getCenter());
-    const originLL=[origin.lat, origin.lng];
-    const dest=d.stops[d.stops.length-1]?.q||'';
-    const waypoints=d.stops.slice(0,-1).map(s=>s.q);
-    window.open(externalNavURL(originLL, dest, waypoints, mode), '_blank');
-  });
-
-  // 初始渲染＆定位
-  function render(){ panels.innerHTML=''; renderPanels(); }
-  render(); startWatch();
-
-  // ====== 行程管理（與前版相同） ======
-  // 簡化：使用 prompt 新增、刪除；支援分享、匯入、匯出
-  // 管理按鈕
-  const adminBar=document.createElement('div');
-  adminBar.style.position='fixed'; adminBar.style.right='10px'; adminBar.style.bottom='10px';
-  adminBar.innerHTML=`
-    <button class="btn ghost" id="btnAdd">＋新增站點</button>
-    <button class="btn ghost" id="btnDel">刪除站點</button>
-    <button class="btn ghost" id="btnShare">分享連結</button>
-    <button class="btn ghost" id="btnExport">匯出</button>
-    <button class="btn ghost" id="btnImport">匯入</button>`;
-  document.body.appendChild(adminBar);
-
-  document.getElementById('btnAdd').addEventListener('click',()=>{
-    const dayId=Number(prompt('新增到第幾天（1-4）？')); if(!dayId) return;
-    const time=prompt('時間（如 14:00–16:00 或 下午）')||'';
-    const title=prompt('標題')||'未命名';
-    const q=prompt('關鍵字或經緯度（直線導航需經緯度）')||'';
-    const note=prompt('備註（可留白）')||'';
-    const d=days.find(x=>x.id===dayId); if(!d) return alert('找不到指定天數');
-    d.stops.push({time,title,q,note}); save(); render();
-  });
-  document.getElementById('btnDel').addEventListener('click',()=>{
-    const dayId=Number(prompt('要刪除哪一天（1-4）？')); const idx=Number(prompt('刪除該日第幾個站點（從 1 開始）？')); if(!dayId||!idx) return;
-    const d=days.find(x=>x.id===dayId); if(!d||!d.stops[idx-1]) return alert('找不到站點');
-    d.stops.splice(idx-1,1); save(); render();
-  });
-  function makeShareLink(){
-    const json=JSON.stringify(days); const b64=btoa(unescape(encodeURIComponent(json)));
-    const urlQ=`${location.origin}${location.pathname}?reset=1&v=${Date.now()}&data=${b64}`;
-    return (urlQ.length<1800)?urlQ:(`${location.origin}${location.pathname}#d=${b64}`);
-  }
-  document.getElementById('btnShare').addEventListener('click',async()=>{
-    const url=makeShareLink();
-    try{ if(navigator.share){ await navigator.share({title:'行程連結',url}); }
-      else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
-      else { prompt('複製這個連結分享：',url); }
-    }catch{ prompt('複製這個連結分享：',url); }
-  });
-  document.getElementById('btnExport').addEventListener('click',()=>{
-    const blob=new Blob([JSON.stringify(days,null,2)],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download='itinerary.json'; a.click(); URL.revokeObjectURL(url);
-  });
-  document.getElementById('btnImport').addEventListener('click',()=>{
-    const str=prompt('把 days 陣列 JSON 貼上'); if(!str) return;
-    try{ const incoming=JSON.parse(str); if(Array.isArray(incoming)){ localStorage.setItem(LS_KEY, JSON.stringify(incoming)); location.reload(); } else alert('格式需為陣列'); }catch{ alert('JSON 解析失敗'); }
-  });
-
-  // ====== 安裝（A2HS）與 SW ======
-  if('serviceWorker' in navigator){
-    window.addEventListener('load', ()=>{
-      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+      const dest=d.stops[d.stops.length-1]?.q||''; const wp=d.stops.slice(0,-1).map(s=>s.q);
+      window.open(externalNavURL([origin.lat,origin.lng], dest, wp, mode), '_blank');
     });
-  }
-  let deferredPrompt=null;
-  window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; document.getElementById('btnInstall').style.opacity='1'; });
-  document.getElementById('btnInstall').addEventListener('click', async ()=>{
-    if(!deferredPrompt) return alert('此瀏覽器暫不支援安裝提示。');
-    deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null;
+    document.getElementById('btnRecenter').addEventListener('click',()=>{ if(meMarker) map.panTo(meMarker.getLatLng()); });
+    document.getElementById('btnFollow').addEventListener('click',()=>{
+      followOn=!followOn; document.getElementById('btnFollow').textContent = followOn ? '🛑 停止直線導引' : '🔔 開啟直線導引';
+      if(!followOn){ currentTarget=null; if(legLine){ map.removeLayer(legLine); legLine=null; } }
+    });
+
+    /* ---------- PWA 設定（可留） ---------- */
+    if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); }); }
+    let deferredPrompt=null;
+    window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; document.getElementById('btnInstall').style.opacity='1'; });
+    document.getElementById('btnInstall').addEventListener('click', async ()=>{ if(!deferredPrompt) return alert('此瀏覽器暫不支援安裝提示。'); deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; });
   });
   </script>
 </body>
