@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>曼谷行程｜內嵌導航（無金鑰：OSRM+Nominatim）</title>
+<title>曼谷行程｜內嵌導航（OSRM+Nominatim，無金鑰）</title>
 <meta name="theme-color" content="#0f172a"/>
 <style>
 :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--chip:#1f2937;--btn:#16a34a;}
@@ -33,7 +33,7 @@ header{position:sticky;top:0;z-index:30;background:linear-gradient(180deg,rgba(1
 .leaflet-control-scale-line{background:#0b1220;color:#e5e7eb;border:1px solid rgba(255,255,255,.12)}
 </style>
 
-<!-- 動態載入 Leaflet（多 CDN 退避；無金鑰） -->
+<!-- Leaflet 多 CDN 退避 -->
 <link id="leaflet-css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script>
 (function(){
@@ -57,9 +57,9 @@ header{position:sticky;top:0;z-index:30;background:linear-gradient(180deg,rgba(1
   <div class="head">
     <div>
       <div class="title">曼谷行程｜內嵌導航（無金鑰）</div>
-      <div class="sub">即時定位＋內嵌地圖；開車/步行內算路線與時間（OSRM）；<b>大眾運輸：外開 Google</b></div>
+      <div class="sub">即時定位＋內嵌地圖；開車/步行內算（OSRM）；<b>大眾運輸外開 Google</b></div>
     </div>
-    <div style="margin-left:auto" class="small">※ 無金鑰：路徑由 OSRM 公用伺服器提供</div>
+    <div style="margin-left:auto" class="small">提示：iPhone 設定要開「精確位置」以提高精度</div>
   </div>
   <div class="tabs" role="tablist" aria-label="Days">
     <button class="tab" id="tab-1" aria-selected="true">Day 1｜9/26 (五)</button>
@@ -74,8 +74,9 @@ header{position:sticky;top:0;z-index:30;background:linear-gradient(180deg,rgba(1
       <option value="transit">大眾運輸（外開 Google）</option>
     </select>
     <button class="btn" id="btnFollow">🛰 跟隨我：開</button>
-    <button class="btn ghost" id="btnRecenter">🎯 回到我的位置</button>
-    <button class="btn ghost" id="btnStop">🛑 停止導航</button>
+    <button class="btn ghost" id="btnPrecise">🎯 精準模式：開</button>
+    <button class="btn ghost" id="btnRecenter">回到我的位置</button>
+    <button class="btn ghost" id="btnStop">停止導航</button>
     <button class="btn ghost" id="btnShare">分享整份行程</button>
   </div>
 </header>
@@ -94,7 +95,7 @@ header{position:sticky;top:0;z-index:30;background:linear-gradient(180deg,rgba(1
 <div class="error" id="errorbar"></div>
 
 <script>
-/* ========= 行程資料 ========= */
+/* ====== 行程（Day4 已拆：Big C / 暹羅廣場） ====== */
 const DEFAULT_DAYS=[
  {id:1,label:'Day 1｜9/26 (五)',chips:['Asok｜Erawan','Chula','按摩'],stops:[
   {time:'13:00–14:00',title:'Terminal 21 購物',q:'Terminal 21 Asok'},
@@ -124,12 +125,12 @@ const DEFAULT_DAYS=[
   {time:'13:00–14:00',title:'暹羅廣場 逛街',q:'Siam Square'}
  ]}
 ];
-const LS_KEY='itinerary_osrm_v2_splitday4';
+const LS_KEY='itinerary_osrm_v2_splitday4'; // 沿用你的 key，保留本地資料
 function loadDays(){try{const r=localStorage.getItem(LS_KEY);return r?JSON.parse(r):null;}catch{return null}}
 function saveDays(d){localStorage.setItem(LS_KEY,JSON.stringify(d))}
 let days=loadDays()||JSON.parse(JSON.stringify(DEFAULT_DAYS)); saveDays(days);
 
-/* ========= 工具 ========= */
+/* ====== 小工具 ====== */
 const errorbar=document.getElementById('errorbar');
 const toast=document.getElementById('toast');
 const itinsEl=document.getElementById('itins');
@@ -141,7 +142,7 @@ function encodeQ(q){return encodeURIComponent(q||'');}
 function isLatLng(q){const m=q.match?.(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);return m?{lat:+m[1],lng:+m[2]}:null}
 function gmapsDirURL(originLL,destQ,mode){const s=originLL?`&origin=${encodeURIComponent(originLL.lat+','+originLL.lng)}`:'';return `https://www.google.com/maps/dir/?api=1${s}&destination=${encodeURIComponent(destQ)}&travelmode=${mode}`}
 
-/* ========= UI：渲染 ========= */
+/* ====== UI 渲染 ====== */
 function card(stop,idx,dayId){
   const g=`https://www.google.com/maps/search/?api=1&query=${encodeQ(stop.q)}`;
   return `<div class="card">
@@ -184,43 +185,74 @@ document.addEventListener('click',(e)=>{
   }
 });
 
-/* ========= Leaflet 地圖＋圖層切換＋定位 ========= */
-let map, baseLayers, myMarker, accCircle, routeLine, routeMarkers=[];
-let watchId=null, originLL=null, destLL=null, lastFix=null, lastRouteAt=0, followMe=true;
+/* ====== Leaflet 地圖＋多圖層 ====== */
+let map, baseLayers, myMarker, accCircle, routeLine;
+let watchId=null, originLL=null, destLL=null, lastFix=null, lastRouteAt=0;
+let followMe=true, preciseMode=true; // 新增
 
 document.addEventListener('leaflet:ready',()=>{ initMap(); startWatch(); });
 
 function initMap(){
   map=L.map('map');
-  // 多底圖（可切換）
+
+  // 多底圖（含衛星與衛星混合）
   const osmStd = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'});
   const osmHOT = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap, HOT'});
-  const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap, &copy; CARTO'});
-  const cartoDark  = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap, &copy; CARTO'});
+  const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap & CARTO'});
+  const cartoDark  = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap & CARTO'});
+  const cartoVoy   = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{maxZoom:20,attribution:'&copy; OpenStreetMap & CARTO'});
+  // Esri 衛星 + 標籤（混合）
+  const esriSat   = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles &copy; Esri'});
+  const esriLabel = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'&copy; Esri'});
+  const esriHybrid = L.layerGroup([esriSat, esriLabel]);
+
   baseLayers = {
     'OSM 標準': osmStd,
     'OSM Humanitarian': osmHOT,
-    'Carto Light': cartoLight,
-    'Carto Dark': cartoDark
+    'CARTO Light': cartoLight,
+    'CARTO Dark': cartoDark,
+    'CARTO Voyager': cartoVoy,
+    '衛星圖（Esri）': esriSat,
+    '衛星混合（Esri+標籤）': esriHybrid
   };
-  osmStd.addTo(map); // 預設
+  cartoVoy.addTo(map); // 預設比較好看
   L.control.layers(baseLayers,null,{collapsed:false}).addTo(map);
   L.control.scale({metric:true,imperial:false}).addTo(map);
   map.setView([13.7563,100.5018],12);
 }
 
+/* ====== 定位（精準模式 + 平滑 + 跟隨） ====== */
 document.getElementById('btnFollow').addEventListener('click',()=>{
   followMe=!followMe;
-  document.getElementById('btnFollow').textContent = followMe?'🛰 跟隨我：開':'🛰 跟隨我：關';
+  document.getElementById('btnFollow').textContent=followMe?'🛰 跟隨我：開':'🛰 跟隨我：關';
+});
+document.getElementById('btnPrecise').addEventListener('click',()=>{
+  preciseMode=!preciseMode;
+  document.getElementById('btnPrecise').textContent=preciseMode?'🎯 精準模式：開':'🎯 精準模式：關';
+  showToast(preciseMode?'將忽略精度 > 50m 的定位':'將接受所有定位（可能較飄）');
 });
 
 function startWatch(){
   if(!('geolocation' in navigator)){showError('此裝置不支援定位');return;}
   const opts={enableHighAccuracy:true,maximumAge:0,timeout:15000};
   watchId=navigator.geolocation.watchPosition(pos=>{
-    const {latitude,longitude,accuracy}=pos.coords;
+    let {latitude,longitude,accuracy} = pos.coords;
+
+    // 精準模式：忽略太差的定位
+    if(preciseMode && accuracy>50){ 
+      showToast(`等待更精準定位（目前 ~${Math.round(accuracy)}m）`); 
+      return; 
+    }
+
+    // 位置平滑（簡單 EMA）
+    const alpha=0.3;
+    if(lastFix){
+      latitude  = alpha*latitude  + (1-alpha)*lastFix.lat;
+      longitude = alpha*longitude + (1-alpha)*lastFix.lng;
+    }
     const ll=[latitude,longitude];
     const here={lat:latitude,lng:longitude};
+
     if(!myMarker){
       myMarker=L.marker(ll).addTo(map).bindTooltip('我',{permanent:false});
       accCircle=L.circle(ll,{radius:Math.max(accuracy,15),color:'#22c55e',fillColor:'#22c55e',fillOpacity:.08,weight:1}).addTo(map);
@@ -231,19 +263,24 @@ function startWatch(){
     }
     originLL=here;
     const now=Date.now();
-    if(destLL && (dist(lastFix||here, here)>30 || now-lastRouteAt>10000)) recalcRoute();
+    if(destLL && (distance(lastFix||here, here)>30 || now-lastRouteAt>10000)) recalcRoute();
     lastFix=here;
   },err=>{console.warn(err);showToast('定位暫時失敗，會持續嘗試…');},opts);
 }
+document.getElementById('btnRecenter').addEventListener('click',()=>{ if(myMarker) map.panTo(myMarker.getLatLng()); });
+document.getElementById('btnStop').addEventListener('click',stopNav);
 function stopNav(){
   destLL=null; if(routeLine){map.removeLayer(routeLine);routeLine=null;}
-  routeMarkers.forEach(m=>map.removeLayer(m)); routeMarkers=[];
   etaBox.textContent='尚未開始導航'; panelEl.innerHTML='';
 }
-document.getElementById('btnStop').addEventListener('click',stopNav);
-document.getElementById('btnRecenter').addEventListener('click',()=>{ if(myMarker) map.panTo(myMarker.getLatLng()); });
 
-/* ========= OSRM 路由（開車/步行） ========= */
+/* ====== OSRM：/nearest 貼齊道路 + /route ====== */
+async function osrmNearest(profile, p){
+  const url=`https://router.project-osrm.org/nearest/v1/${profile}/${p.lng},${p.lat}`;
+  const r=await fetch(url); if(!r.ok) throw new Error('nearest 失敗');
+  const j=await r.json(); const c=j?.waypoints?.[0]?.location; 
+  return c?{lng:c[0],lat:c[1]}:p;
+}
 async function osrmRoute(profile, coords){
   const path=coords.map(c=>`${c.lng},${c.lat}`).join(';');
   const url=`https://router.project-osrm.org/route/v1/${profile}/${path}?overview=full&geometries=geojson&steps=true`;
@@ -255,7 +292,7 @@ async function osrmRoute(profile, coords){
 }
 function minutes(s){return `${Math.round(s/60)} 分鐘`;}
 function kms(m){return (m/1000).toFixed(1)+' 公里';}
-function dist(a,b){const R=6371000,toRad=x=>x*Math.PI/180,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),s1=Math.sin(dLat/2),s2=Math.sin(dLng/2),h=s1*s1+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*s2*s2;return 2*R*Math.asin(Math.sqrt(h));}
+function distance(a,b){const R=6371000,toRad=x=>x*Math.PI/180,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),s1=Math.sin(dLat/2),s2=Math.sin(dLng/2),h=s1*s1+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*s2*s2;return 2*R*Math.asin(Math.sqrt(h));}
 
 async function recalcRoute(){
   if(!originLL||!destLL) return;
@@ -266,7 +303,9 @@ async function recalcRoute(){
     return;
   }
   try{
-    const route=await osrmRoute(sel, [originLL, destLL]);
+    // 起點貼齊道路（縮小視差）
+    const snapped = await osrmNearest(sel, originLL).catch(()=>originLL);
+    const route=await osrmRoute(sel, [snapped, destLL]);
     lastRouteAt=Date.now();
     const coords=route.geometry.coordinates.map(([lng,lat])=>[lat,lng]);
     if(routeLine){routeLine.setLatLngs(coords);}else{routeLine=L.polyline(coords,{color:'#22c55e'}).addTo(map);}
@@ -285,7 +324,7 @@ async function recalcRoute(){
   }catch(e){ etaBox.textContent='路線規劃失敗：'+e.message; }
 }
 
-/* ========= Geocoding（Nominatim；無金鑰） ========= */
+/* ====== Geocoding（Nominatim） ====== */
 async function geocode(q){
   const direct=isLatLng(q); if(direct) return direct;
   const url=`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeQ(q)}`;
@@ -296,12 +335,12 @@ async function geocode(q){
   return {lat:+arr[0].lat,lng:+arr[0].lon};
 }
 
-/* ========= 事件：開始導航 / 外開整日 / 增刪 ========= */
+/* ====== 事件：開始導航 / 外開整日 / 增刪 ====== */
 document.addEventListener('click',async(e)=>{
   if(e.target.dataset.nav){
     const q=decodeURIComponent(e.target.dataset.nav);
     const sel=document.getElementById('mode').value;
-    if(sel==='transit'){
+    if(sel==='transit'){ // 直接外開 Google transit
       const url = gmapsDirURL(originLL, q, 'transit');
       const w=window.open(url,'_blank'); if(!w) location.href=url;
       return;
@@ -347,14 +386,13 @@ document.getElementById('btnShare').addEventListener('click',async()=>{
        else if(navigator.clipboard){ await navigator.clipboard.writeText(url); showToast('已複製分享連結'); }
        else { prompt('複製這個連結：',url); } }catch{ prompt('複製這個連結：',url); }
 });
-/* 匯入分享 */
 (function importFromURL(){
   const qs=new URLSearchParams(location.search); const d=qs.get('data');
   if(!d) return;
   try{ const json=decodeURIComponent(escape(atob(d))); const obj=JSON.parse(json);
     if(Array.isArray(obj)&&obj.length){ days=obj; saveDays(days); history.replaceState(null,'',location.pathname); renderList(); }
   }catch{}
-});
+})();
 </script>
 </body>
 </html>
